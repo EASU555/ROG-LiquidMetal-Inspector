@@ -1,0 +1,27 @@
+# Build and packaged output
+/Release/
+/Release_v*/
+/Package/
+/Reports/
+
+# Downloaded third-party dependencies and caches
+/Source/LibreHardwareMonitor/
+/Source/LibreHardwareMonitor.zip
+/Source/librehardwaremonitorlib.*/
+/Source/librehardwaremonitorlib.*.zip
+/Source/librehardwaremonitorlib.*.nupkg
+/Source/.cache/
+
+# Compiled diagnostics and temporary files
+/Source/Diagnostics/bin/
+*.user
+*.suo
+*.tmp
+*.log
+
+# Editor and OS metadata
+.vs/
+.vscode/
+.idea/
+Thumbs.db
+Desktop.ini

@@ -1,0 +1,94 @@
+{
+  "profileId": "rog-strix-g18-g815lr-u9-275hx",
+  "profileName": "ROG Strix G18 G815LR / Core Ultra 9 275HX / RTX 5070 Ti",
+  "version": "2026.07-community-2",
+  "modelContains": "G815LR",
+  "cpuContains": "275HX",
+  "requiredConditions": "原装 280W 适配器；平整硬桌面且机身后部垫高；室温 22–28°C；关闭后台高负载；Armoury Crate/G-Helper 固定在同一性能档位。",
+  "workloadNotice": "档案的温度/功耗来自 AIDA64 FPU 或 Cinebench R23 社区实测。内置浮点负载不等同 AIDA64 FPU，因此仅用作‘高温时功耗塌陷’筛查，不会单独以未达标功耗确诊。",
+  "requirePCoreAndECore": true,
+  "modes": [
+    {
+      "modeName": "性能 / Performance",
+      "testName": "CPU 单烤，AIDA64 FPU 或 Cinebench R23 10 分钟",
+      "steadyStartSecond": 120,
+      "steadyEndSecond": 600,
+      "expectedPowerMin": 100,
+      "expectedPowerMax": 125,
+      "expectedTemperatureMin": 88,
+      "expectedTemperatureMax": 98,
+      "expectedR23MultiMin": 33000,
+      "hotTemperatureC": 95,
+      "lowPowerAtHotMax": 75,
+      "durationSeconds": 60,
+      "normalText": "120 秒后，参考持续释放约 100–125W；FPU 高温接近 95°C 并不单独代表异常。",
+      "suspectText": "连续 60 秒：温度 ≥95°C 且 Package Power ≤75W，或与核心温差异常共同出现，视为档案异常并建议复测。"
+    },
+    {
+      "modeName": "增强 / Turbo",
+      "testName": "CPU 单烤，AIDA64 FPU 10 分钟",
+      "steadyStartSecond": 120,
+      "steadyEndSecond": 600,
+      "expectedPowerMin": 120,
+      "expectedPowerMax": 140,
+      "expectedTemperatureMin": 90,
+      "expectedTemperatureMax": 98,
+      "expectedR23MultiMin": 38000,
+      "hotTemperatureC": 95,
+      "lowPowerAtHotMax": 90,
+      "durationSeconds": 60,
+      "normalText": "120 秒后，社区参考持续释放约 120–140W、约 90–98°C；短时高于 140W 的冲高不进入稳态比较。",
+      "suspectText": "连续 60 秒：温度 ≥95°C 且 Package Power ≤90W；若同时 CoreDelta P95 ≥20°C 或固定核心热点，则属于强疑似散热接触异常。"
+    }
+  ],
+  "gpuModes": [
+    {
+      "modeName": "性能 / Performance",
+      "minimumLoadPct": 85,
+      "singleExpectedPowerMin": 95,
+      "singleExpectedPowerMax": 140,
+      "dualExpectedPowerMin": 75,
+      "dualExpectedPowerMax": 130,
+      "hotTemperatureC": 85,
+      "lowPowerAtHotMax": 75,
+      "durationSeconds": 60,
+      "normalText": "GPU 单烤需先确认独显负载持续 ≥85%；双烤功耗会受整机功耗预算动态分配。",
+      "suspectText": "在独显负载持续 ≥85% 时，GPU 核心温度 ≥85°C 且功耗持续低于对应档位下限，标记为建议复测。"
+    },
+    {
+      "modeName": "增强 / Turbo",
+      "minimumLoadPct": 85,
+      "singleExpectedPowerMin": 100,
+      "singleExpectedPowerMax": 140,
+      "dualExpectedPowerMin": 80,
+      "dualExpectedPowerMax": 135,
+      "hotTemperatureC": 85,
+      "lowPowerAtHotMax": 80,
+      "durationSeconds": 60,
+      "normalText": "RTX 5070 Ti 官方最高 140W；GPU 单烤应优先验证 ≥85% 的持续负载，双烤不要求始终达到 140W。",
+      "suspectText": "在独显负载持续 ≥85% 时，GPU 核心温度 ≥85°C 且功耗 ≤80W 持续 60 秒，标记为建议复测。"
+    }
+  ],
+  "sources": [
+    {
+      "tier": "官方机型确认",
+      "title": "ROG Strix G18 (2025) G815 技术规格：275HX / RTX 5070 Ti 140W",
+      "url": "https://rog.asus.com/gr-en/laptops/rog-strix/rog-strix-g18-2025/spec/?config=90NR0LC1-M004F0"
+    },
+    {
+      "tier": "同代 ROG 社区/评测参考",
+      "title": "枪神9 U9 275HX：FPU 10 分钟 120–140W、约 97°C",
+      "url": "https://www.sohu.com/a/963417767_122471764"
+    },
+    {
+      "tier": "同代 ROG 社区参考",
+      "title": "枪神9 275HX：性能档 FPU 持续 100W+，增强档持续 140W+；R23 约 33K/38K",
+      "url": "https://www.zhihu.com/tardis/bd/art/1900685127182444374"
+    },
+    {
+      "tier": "同机型异常案例（单案例）",
+      "title": "G815LR 异常：单烤约 40W，对比到手约 125W，核心最大温差超过 30°C",
+      "url": "https://m.okjike.com/originalPosts/68fd16c600c0686ab5684106"
+    }
+  ]
+}
