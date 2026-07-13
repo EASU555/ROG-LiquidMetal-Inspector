@@ -234,9 +234,9 @@ namespace RogLiquidMetalInspector
             _reason = new TextBlock { Text = "完整检测会按：预检 → 空闲基线 → 热点探测 → CPU 主测记录原始数据。", TextWrapping = TextWrapping.Wrap, LineHeight = 21, Margin = new Thickness(0, 9, 0, 12), Foreground = Brush("#334155") };
             panel.Children.Add(_verdict); panel.Children.Add(_reason);
             panel.Children.Add(new Separator { Margin = new Thickness(0, 4, 0, 10) });
-            AddBullet(panel, "15–20°C：输出“建议复测”，不直接拆机。");
-            AddBullet(panel, "≥20°C 且连续 ≥60 秒：输出“疑似散热接触异常”。");
-            AddBullet(panel, "缺少核心温度或功耗：输出“无法判断”。");
+            AddBullet(panel, "单一核心温差、高温或低功耗只形成一条线索，不直接判液金偏移。");
+            AddBullet(panel, "至少两类独立证据，并通过负载、时长和样本覆盖率置信度校验后，才输出“疑似”。");
+            AddBullet(panel, "缺少关键传感器、负载不稳或分析时间不足：输出“无法判断/建议复测”。");
             AddBullet(panel, "温度持续贴近 100°C：自动停止并保留证据。");
             panel.Children.Add(new TextBlock { Text = "注意：程序不能在不拆机的情况下确认液金的物理偏移或泄漏。", Foreground = Brush("#8A4B0F"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 12, 0, 0) });
             return Wrap(panel);
@@ -278,8 +278,9 @@ namespace RogLiquidMetalInspector
             _verdict = new TextBlock { Text = "尚未运行", FontSize = 22, FontWeight = FontWeights.SemiBold, Foreground = Brush("#475467"), TextWrapping = TextWrapping.Wrap };
             _reason = new TextBlock { Text = "完整检测会按：预检 → 空闲基线 → 热点探测 → CPU 主测记录原始数据。", TextWrapping = TextWrapping.Wrap, LineHeight = 19, Margin = new Thickness(0, 4, 0, 6), Foreground = Brush("#334155") };
             panel.Children.Add(_verdict); panel.Children.Add(_reason);
-            AddBullet(panel, "15–20°C：建议复测；≥20°C 且持续 ≥60 秒：疑似散热接触异常。");
-            AddBullet(panel, "缺少核心温度或功耗时不作判断；温度连续贴近 100°C 会自动停止。");
+            AddBullet(panel, "综合空间温差、固定热点、高温低功耗、功耗/频率保持率和时间趋势；单一高温不计异常分。");
+            AddBullet(panel, "至少两类独立证据且置信度达标才输出“疑似”；快速筛查与不完整测试不形成最终结论。");
+            AddBullet(panel, "CPU 100°C 或 GPU 90°C 持续达到安全时长会自动停止并保留证据。");
             panel.Children.Add(new TextBlock { Text = "软件只能筛查散热接触异常，不能在不拆机时确认液金的实体偏移或泄漏。", Foreground = Brush("#8A4B0F"), TextWrapping = TextWrapping.Wrap, Margin = new Thickness(0, 3, 0, 0) });
             return Wrap(new ScrollViewer { Content = panel, VerticalScrollBarVisibility = ScrollBarVisibility.Auto, HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled, Padding = new Thickness(0, 0, 5, 0) });
         }

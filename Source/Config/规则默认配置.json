@@ -1,5 +1,6 @@
 {
-  "version": "1.1.0",
+  "version": "2.0.0",
+  "diagnosticRuleVersion": "multi-evidence-2.0",
   "samplingIntervalSeconds": 1,
   "idleSeconds": 120,
   "hotspotProbeSeconds": 60,
@@ -20,5 +21,24 @@
   "gpuLoadDroppedPct": 40,
   "gpuEstablishTimeoutSeconds": 20,
   "gpuDropTimeoutSeconds": 10,
-  "note": "20°C 是社区经验触发值；程序只输出疑似散热接触异常，不确认液金物理偏移。"
+  "minimumFullAnalysisSeconds": 240,
+  "minimumCpuLoadPct": 85,
+  "maximumLoadCoefficientOfVariation": 0.15,
+  "maximumPowerCoefficientOfVariation": 0.25,
+  "dominantHotspotShareWarning": 0.70,
+  "powerRetentionWarningRatio": 0.80,
+  "powerRetentionCriticalRatio": 0.65,
+  "clockRetentionWarningRatio": 0.85,
+  "clockRetentionCriticalRatio": 0.70,
+  "cpuNearLimitTemperatureC": 100,
+  "gpuHotspotDeltaWarningC": 20,
+  "gpuHotspotDeltaCriticalC": 30,
+  "evidenceWatchScore": 25,
+  "evidenceSuspectScore": 50,
+  "evidenceStrongScore": 70,
+  "minimumDecisionConfidence": 65,
+  "temperatureSlopeUnstableCPerMinute": 2.0,
+  "idleCpuWarningTemperatureC": 80,
+  "maximumIdleCpuLoadPct": 20,
+  "note": "规则采用空间温差、固定热点、热-功耗耦合、功耗/频率保持率、负载稳定性和数据置信度联合判断；任何单一温度或单一社区阈值都不能确诊液金物理偏移。"
 }

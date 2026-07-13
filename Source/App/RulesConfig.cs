@@ -27,12 +27,33 @@ namespace RogLiquidMetalInspector
         public double GpuLoadDroppedPct { get; set; }
         public int GpuEstablishTimeoutSeconds { get; set; }
         public int GpuDropTimeoutSeconds { get; set; }
+        public string DiagnosticRuleVersion { get; set; }
+        public int MinimumFullAnalysisSeconds { get; set; }
+        public double MinimumCpuLoadPct { get; set; }
+        public double MaximumLoadCoefficientOfVariation { get; set; }
+        public double MaximumPowerCoefficientOfVariation { get; set; }
+        public double DominantHotspotShareWarning { get; set; }
+        public double PowerRetentionWarningRatio { get; set; }
+        public double PowerRetentionCriticalRatio { get; set; }
+        public double ClockRetentionWarningRatio { get; set; }
+        public double ClockRetentionCriticalRatio { get; set; }
+        public double CpuNearLimitTemperatureC { get; set; }
+        public double GpuHotspotDeltaWarningC { get; set; }
+        public double GpuHotspotDeltaCriticalC { get; set; }
+        public double EvidenceWatchScore { get; set; }
+        public double EvidenceSuspectScore { get; set; }
+        public double EvidenceStrongScore { get; set; }
+        public double MinimumDecisionConfidence { get; set; }
+        public double TemperatureSlopeUnstableCPerMinute { get; set; }
+        public double IdleCpuWarningTemperatureC { get; set; }
+        public double MaximumIdleCpuLoadPct { get; set; }
 
         public static RulesConfig Default()
         {
             return new RulesConfig
             {
-                Version = "1.1.0",
+                Version = "2.0.0",
+                DiagnosticRuleVersion = "multi-evidence-2.0",
                 SamplingIntervalSeconds = 1,
                 IdleSeconds = 120,
                 HotspotProbeSeconds = 60,
@@ -52,7 +73,26 @@ namespace RogLiquidMetalInspector
                 GpuPowerEstablishedW = 50,
                 GpuLoadDroppedPct = 40,
                 GpuEstablishTimeoutSeconds = 20,
-                GpuDropTimeoutSeconds = 10
+                GpuDropTimeoutSeconds = 10,
+                MinimumFullAnalysisSeconds = 240,
+                MinimumCpuLoadPct = 85,
+                MaximumLoadCoefficientOfVariation = 0.15,
+                MaximumPowerCoefficientOfVariation = 0.25,
+                DominantHotspotShareWarning = 0.70,
+                PowerRetentionWarningRatio = 0.80,
+                PowerRetentionCriticalRatio = 0.65,
+                ClockRetentionWarningRatio = 0.85,
+                ClockRetentionCriticalRatio = 0.70,
+                CpuNearLimitTemperatureC = 100,
+                GpuHotspotDeltaWarningC = 20,
+                GpuHotspotDeltaCriticalC = 30,
+                EvidenceWatchScore = 25,
+                EvidenceSuspectScore = 50,
+                EvidenceStrongScore = 70,
+                MinimumDecisionConfidence = 65,
+                TemperatureSlopeUnstableCPerMinute = 2.0,
+                IdleCpuWarningTemperatureC = 80,
+                MaximumIdleCpuLoadPct = 20
             };
         }
 
@@ -93,6 +133,26 @@ namespace RogLiquidMetalInspector
             if (value.GpuLoadDroppedPct <= 0) value.GpuLoadDroppedPct = fallback.GpuLoadDroppedPct;
             if (value.GpuEstablishTimeoutSeconds <= 0) value.GpuEstablishTimeoutSeconds = fallback.GpuEstablishTimeoutSeconds;
             if (value.GpuDropTimeoutSeconds <= 0) value.GpuDropTimeoutSeconds = fallback.GpuDropTimeoutSeconds;
+            if (string.IsNullOrWhiteSpace(value.DiagnosticRuleVersion)) value.DiagnosticRuleVersion = fallback.DiagnosticRuleVersion;
+            if (value.MinimumFullAnalysisSeconds <= 0) value.MinimumFullAnalysisSeconds = fallback.MinimumFullAnalysisSeconds;
+            if (value.MinimumCpuLoadPct <= 0 || value.MinimumCpuLoadPct > 100) value.MinimumCpuLoadPct = fallback.MinimumCpuLoadPct;
+            if (value.MaximumLoadCoefficientOfVariation <= 0 || value.MaximumLoadCoefficientOfVariation > 1) value.MaximumLoadCoefficientOfVariation = fallback.MaximumLoadCoefficientOfVariation;
+            if (value.MaximumPowerCoefficientOfVariation <= 0 || value.MaximumPowerCoefficientOfVariation > 1) value.MaximumPowerCoefficientOfVariation = fallback.MaximumPowerCoefficientOfVariation;
+            if (value.DominantHotspotShareWarning <= 0 || value.DominantHotspotShareWarning > 1) value.DominantHotspotShareWarning = fallback.DominantHotspotShareWarning;
+            if (value.PowerRetentionWarningRatio <= 0 || value.PowerRetentionWarningRatio > 1) value.PowerRetentionWarningRatio = fallback.PowerRetentionWarningRatio;
+            if (value.PowerRetentionCriticalRatio <= 0 || value.PowerRetentionCriticalRatio >= value.PowerRetentionWarningRatio) value.PowerRetentionCriticalRatio = fallback.PowerRetentionCriticalRatio;
+            if (value.ClockRetentionWarningRatio <= 0 || value.ClockRetentionWarningRatio > 1) value.ClockRetentionWarningRatio = fallback.ClockRetentionWarningRatio;
+            if (value.ClockRetentionCriticalRatio <= 0 || value.ClockRetentionCriticalRatio >= value.ClockRetentionWarningRatio) value.ClockRetentionCriticalRatio = fallback.ClockRetentionCriticalRatio;
+            if (value.CpuNearLimitTemperatureC <= 0) value.CpuNearLimitTemperatureC = fallback.CpuNearLimitTemperatureC;
+            if (value.GpuHotspotDeltaWarningC <= 0) value.GpuHotspotDeltaWarningC = fallback.GpuHotspotDeltaWarningC;
+            if (value.GpuHotspotDeltaCriticalC <= value.GpuHotspotDeltaWarningC) value.GpuHotspotDeltaCriticalC = fallback.GpuHotspotDeltaCriticalC;
+            if (value.EvidenceWatchScore <= 0) value.EvidenceWatchScore = fallback.EvidenceWatchScore;
+            if (value.EvidenceSuspectScore <= value.EvidenceWatchScore) value.EvidenceSuspectScore = fallback.EvidenceSuspectScore;
+            if (value.EvidenceStrongScore <= value.EvidenceSuspectScore) value.EvidenceStrongScore = fallback.EvidenceStrongScore;
+            if (value.MinimumDecisionConfidence <= 0 || value.MinimumDecisionConfidence > 100) value.MinimumDecisionConfidence = fallback.MinimumDecisionConfidence;
+            if (value.TemperatureSlopeUnstableCPerMinute <= 0) value.TemperatureSlopeUnstableCPerMinute = fallback.TemperatureSlopeUnstableCPerMinute;
+            if (value.IdleCpuWarningTemperatureC <= 0) value.IdleCpuWarningTemperatureC = fallback.IdleCpuWarningTemperatureC;
+            if (value.MaximumIdleCpuLoadPct <= 0 || value.MaximumIdleCpuLoadPct > 100) value.MaximumIdleCpuLoadPct = fallback.MaximumIdleCpuLoadPct;
         }
     }
 }

@@ -1,94 +1,109 @@
 {
   "profileId": "rog-strix-g18-g815lr-u9-275hx",
   "profileName": "ROG Strix G18 G815LR / Core Ultra 9 275HX / RTX 5070 Ti",
-  "version": "2026.07-community-2",
+  "version": "2026.07-evidence-3",
   "modelContains": "G815LR",
   "cpuContains": "275HX",
   "requiredConditions": "原装 280W 适配器；平整硬桌面且机身后部垫高；室温 22–28°C；关闭后台高负载；Armoury Crate/G-Helper 固定在同一性能档位。",
-  "workloadNotice": "档案的温度/功耗来自 AIDA64 FPU 或 Cinebench R23 社区实测。内置浮点负载不等同 AIDA64 FPU，因此仅用作‘高温时功耗塌陷’筛查，不会单独以未达标功耗确诊。",
+  "workloadNotice": "同机身专业评测在不同压力软件中出现约 93–146W、89–98°C 的正常结果，说明温度或瓦数不能脱离负载解释。内置浮点负载不等同 AIDA64 FPU/Cinebench，因此档案只用于高温低功耗组合筛查，不会以单一未达标瓦数确诊。",
   "requirePCoreAndECore": true,
   "modes": [
     {
       "modeName": "性能 / Performance",
-      "testName": "CPU 单烤，AIDA64 FPU 或 Cinebench R23 10 分钟",
+      "testName": "CPU 单烤，稳定段 120–600 秒",
       "steadyStartSecond": 120,
       "steadyEndSecond": 600,
-      "expectedPowerMin": 100,
-      "expectedPowerMax": 125,
-      "expectedTemperatureMin": 88,
-      "expectedTemperatureMax": 98,
-      "expectedR23MultiMin": 33000,
+      "expectedPowerMin": 90,
+      "expectedPowerMax": 130,
+      "expectedTemperatureMin": 85,
+      "expectedTemperatureMax": 100,
+      "expectedR23MultiMin": 0,
       "hotTemperatureC": 95,
-      "lowPowerAtHotMax": 75,
+      "lowPowerAtHotMax": 60,
       "durationSeconds": 60,
-      "normalText": "120 秒后，参考持续释放约 100–125W；FPU 高温接近 95°C 并不单独代表异常。",
-      "suspectText": "连续 60 秒：温度 ≥95°C 且 Package Power ≤75W，或与核心温差异常共同出现，视为档案异常并建议复测。"
+      "normalText": "同 G815 机身评测表明约 93W/98°C 也可能是正常压力稳态；接近 100°C 本身不计异常分。",
+      "suspectText": "负载成立时，≥95°C 且 ≤60W 持续 60 秒才形成热阻线索；仍须与空间温差、功耗/频率衰减或异常空闲基线交叉验证。"
     },
     {
       "modeName": "增强 / Turbo",
-      "testName": "CPU 单烤，AIDA64 FPU 10 分钟",
+      "testName": "CPU 单烤，稳定段 120–600 秒",
       "steadyStartSecond": 120,
       "steadyEndSecond": 600,
-      "expectedPowerMin": 120,
-      "expectedPowerMax": 140,
-      "expectedTemperatureMin": 90,
-      "expectedTemperatureMax": 98,
-      "expectedR23MultiMin": 38000,
+      "expectedPowerMin": 90,
+      "expectedPowerMax": 150,
+      "expectedTemperatureMin": 85,
+      "expectedTemperatureMax": 100,
+      "expectedR23MultiMin": 0,
       "hotTemperatureC": 95,
-      "lowPowerAtHotMax": 90,
+      "lowPowerAtHotMax": 60,
       "durationSeconds": 60,
-      "normalText": "120 秒后，社区参考持续释放约 120–140W、约 90–98°C；短时高于 140W 的冲高不进入稳态比较。",
-      "suspectText": "连续 60 秒：温度 ≥95°C 且 Package Power ≤90W；若同时 CoreDelta P95 ≥20°C 或固定核心热点，则属于强疑似散热接触异常。"
+      "normalText": "精确型号专业评测的 30 分钟 CPU 长负载约 146W/89°C，另一个同机身压力样本约 93W/98°C；软件、BIOS 与风扇策略会显著改变绝对值。",
+      "suspectText": "负载成立时，≥95°C 且 ≤60W 持续 60 秒才形成热阻线索；同机型异常个案曾出现约 40W 高温与性能下降，但 n=1 不能当作故障率或确诊线。"
     }
   ],
   "gpuModes": [
     {
       "modeName": "性能 / Performance",
       "minimumLoadPct": 85,
-      "singleExpectedPowerMin": 95,
+      "singleExpectedPowerMin": 90,
       "singleExpectedPowerMax": 140,
-      "dualExpectedPowerMin": 75,
-      "dualExpectedPowerMax": 130,
+      "dualExpectedPowerMin": 60,
+      "dualExpectedPowerMax": 135,
       "hotTemperatureC": 85,
-      "lowPowerAtHotMax": 75,
+      "lowPowerAtHotMax": 70,
       "durationSeconds": 60,
-      "normalText": "GPU 单烤需先确认独显负载持续 ≥85%；双烤功耗会受整机功耗预算动态分配。",
-      "suspectText": "在独显负载持续 ≥85% 时，GPU 核心温度 ≥85°C 且功耗持续低于对应档位下限，标记为建议复测。"
+      "normalText": "精确型号一小时游戏样本约 138W、GPU 平均 71°C/峰值 74°C；140W 是 Dynamic Boost 条件下的最高值，不是每个负载都必须持续达到的目标。",
+      "suspectText": "独显负载 ≥85% 时，核心 ≥85°C 且 ≤70W 持续 60 秒才形成热阻线索；双烤中该线索因 Dynamic Boost 自动降权。"
     },
     {
       "modeName": "增强 / Turbo",
       "minimumLoadPct": 85,
-      "singleExpectedPowerMin": 100,
+      "singleExpectedPowerMin": 90,
       "singleExpectedPowerMax": 140,
-      "dualExpectedPowerMin": 80,
+      "dualExpectedPowerMin": 60,
       "dualExpectedPowerMax": 135,
       "hotTemperatureC": 85,
-      "lowPowerAtHotMax": 80,
+      "lowPowerAtHotMax": 70,
       "durationSeconds": 60,
-      "normalText": "RTX 5070 Ti 官方最高 140W；GPU 单烤应优先验证 ≥85% 的持续负载，双烤不要求始终达到 140W。",
-      "suspectText": "在独显负载持续 ≥85% 时，GPU 核心温度 ≥85°C 且功耗 ≤80W 持续 60 秒，标记为建议复测。"
+      "normalText": "NVIDIA 公布 RTX 5070 Ti Laptop GPU 子系统功耗范围 60–115W；G815LR 配置可通过 Dynamic Boost 最高到 140W，但双烤不能要求 CPU、GPU 同时达到单烤上限。",
+      "suspectText": "独显负载 ≥85% 时，核心 ≥85°C 且 ≤70W 持续 60 秒才形成热阻线索；还需功耗/频率衰减或 Hot Spot 空间证据。RTX 50 缺少 Hot Spot 时不得以 0°C 代替。"
     }
   ],
   "sources": [
     {
-      "tier": "官方机型确认",
-      "title": "ROG Strix G18 (2025) G815 技术规格：275HX / RTX 5070 Ti 140W",
-      "url": "https://rog.asus.com/gr-en/laptops/rog-strix/rog-strix-g18-2025/spec/?config=90NR0LC1-M004F0"
+      "tier": "A：ASUS 官方机型规格",
+      "title": "ROG Strix G18 (2025) G815：275HX、RTX 5070 Ti 最高 140W、CPU Conductonaut Extreme",
+      "url": "https://rog.asus.com/us/laptops/rog-strix/rog-strix-g18-2025/"
     },
     {
-      "tier": "同代 ROG 社区/评测参考",
-      "title": "枪神9 U9 275HX：FPU 10 分钟 120–140W、约 97°C",
-      "url": "https://www.sohu.com/a/963417767_122471764"
+      "tier": "A：Intel 官方规格",
+      "title": "Core Ultra 9 275HX：PBP 55W、MTP 160W、最高工作温度 105°C",
+      "url": "https://www.intel.com/content/www/us/en/products/sku/242293/intel-core-ultra-9-processor-275hx-36m-cache-up-to-5-40-ghz/specifications.html"
     },
     {
-      "tier": "同代 ROG 社区参考",
-      "title": "枪神9 275HX：性能档 FPU 持续 100W+，增强档持续 140W+；R23 约 33K/38K",
-      "url": "https://www.zhihu.com/tardis/bd/art/1900685127182444374"
+      "tier": "A：NVIDIA 官方规格",
+      "title": "RTX 5070 Ti Laptop GPU：60–115W；整机可另有 Dynamic Boost",
+      "url": "https://www.nvidia.com/en-us/geforce/laptops/compare/"
     },
     {
-      "tier": "同机型异常案例（单案例）",
-      "title": "G815LR 异常：单烤约 40W，对比到手约 125W，核心最大温差超过 30°C",
-      "url": "https://m.okjike.com/originalPosts/68fd16c600c0686ab5684106"
+      "tier": "B：精确型号专业评测",
+      "title": "G815LR：CPU 30 分钟长负载约 146W/89°C；GPU 游戏约 138W/71°C",
+      "url": "https://laptopmedia.com/sg/review/asus-rog-strix-g18-g815-2025-review-the-desktop-replacement-that-gets-everything-right/"
+    },
+    {
+      "tier": "B：同 G815 机身专业评测",
+      "title": "G815LW：CPU 单烤约 93W/98°C，双烤 CPU 约 58W/93°C",
+      "url": "https://www.ixbt.com/mobilepc/asus-rog-strix-g18-2025-g815lw-review.html"
+    },
+    {
+      "tier": "D：精确型号异常前后个案（n=1）",
+      "title": "G815LR：空闲/轻载异常高温与性能下降，更换界面材料后改善",
+      "url": "https://www.reddit.com/r/ASUSROG/comments/1um855p/ive_removed_liquid_metal_from_cpu_and_gpu_on_asus/"
+    },
+    {
+      "tier": "D：传感器限制",
+      "title": "HWiNFO 作者：RTX 50 系列不提供有效 GPU Hot Spot",
+      "url": "https://www.hwinfo.com/forum/threads/nvidia-rtx-5080-incorrect-gpu-hotspot-temp-missing-3rd-fan-speed-summary-info.10306/"
     }
   ]
 }

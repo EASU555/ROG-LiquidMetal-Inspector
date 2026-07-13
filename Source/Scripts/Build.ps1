@@ -4,7 +4,7 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
-$version = '1.0.12'
+$version = '1.1.0'
 $root = Split-Path -Parent (Split-Path -Parent $PSScriptRoot)
 $source = Join-Path $root 'Source\App'
 $release = Join-Path $root ("Release_v{0}" -f $version)
