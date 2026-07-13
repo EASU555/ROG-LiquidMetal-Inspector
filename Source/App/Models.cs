@@ -105,6 +105,59 @@ namespace RogLiquidMetalInspector
         public bool IsComplete { get; set; }
         public string RunError { get; set; }
         public string PreliminaryVerdict { get; set; }
+        public string DiagnosticRuleVersion { get; set; }
+        public double SuspicionScore { get; set; }
+        public double CpuSuspicionScore { get; set; }
+        public double GpuSuspicionScore { get; set; }
+        public double ConfidenceScore { get; set; }
+        public string ConfidenceLevel { get; set; }
+        public int IndependentEvidenceCount { get; set; }
+        public double DominantHotspotShare { get; set; }
+        public double CpuAverageLoad { get; set; }
+        public double CpuLoadCoefficientOfVariation { get; set; }
+        public double CpuPowerCoefficientOfVariation { get; set; }
+        public double CpuPowerRetention { get; set; }
+        public double CpuClockRetention { get; set; }
+        public double CpuTemperatureSlopeCPerMinute { get; set; }
+        public double CpuPowerSlopeWPerMinute { get; set; }
+        public double IdleCpuTemperature { get; set; }
+        public double IdleCpuLoad { get; set; }
+        public double GpuLoadCoefficientOfVariation { get; set; }
+        public double GpuPowerCoefficientOfVariation { get; set; }
+        public double GpuPowerRetention { get; set; }
+        public double GpuClockRetention { get; set; }
+        public double GpuTemperatureSlopeCPerMinute { get; set; }
+        public double GpuHotspotDeltaP95 { get; set; }
+        public int SustainedGpuHotspotDeltaSeconds { get; set; }
+        public double IdleGpuTemperature { get; set; }
+        public double IdleGpuLoad { get; set; }
+        public double TotalSteadyPower { get; set; }
+        public double TotalPowerRetention { get; set; }
+        public int NearCpuLimitSeconds { get; set; }
+        public int NearGpuLimitSeconds { get; set; }
+        public List<DiagnosticEvidence> Evidence { get; set; }
+
+        public AnalysisResult()
+        {
+            Evidence = new List<DiagnosticEvidence>();
+            ConfidenceLevel = string.Empty;
+            DiagnosticRuleVersion = string.Empty;
+        }
+    }
+
+    public sealed class DiagnosticEvidence
+    {
+        public string Code { get; set; }
+        public string Component { get; set; }
+        public string Category { get; set; }
+        public string Level { get; set; }
+        public string Title { get; set; }
+        public string Description { get; set; }
+        public string Observed { get; set; }
+        public string Threshold { get; set; }
+        public string SourceTier { get; set; }
+        public double Score { get; set; }
+        public bool Triggered { get; set; }
     }
 
     public sealed class RunConfiguration
@@ -130,6 +183,26 @@ namespace RogLiquidMetalInspector
         public double GpuLoadDroppedPct { get; set; }
         public int GpuEstablishTimeoutSeconds { get; set; }
         public int GpuDropTimeoutSeconds { get; set; }
+        public string DiagnosticRuleVersion { get; set; }
+        public int MinimumFullAnalysisSeconds { get; set; }
+        public double MinimumCpuLoadPct { get; set; }
+        public double MaximumLoadCoefficientOfVariation { get; set; }
+        public double MaximumPowerCoefficientOfVariation { get; set; }
+        public double DominantHotspotShareWarning { get; set; }
+        public double PowerRetentionWarningRatio { get; set; }
+        public double PowerRetentionCriticalRatio { get; set; }
+        public double ClockRetentionWarningRatio { get; set; }
+        public double ClockRetentionCriticalRatio { get; set; }
+        public double CpuNearLimitTemperatureC { get; set; }
+        public double GpuHotspotDeltaWarningC { get; set; }
+        public double GpuHotspotDeltaCriticalC { get; set; }
+        public double EvidenceWatchScore { get; set; }
+        public double EvidenceSuspectScore { get; set; }
+        public double EvidenceStrongScore { get; set; }
+        public double MinimumDecisionConfidence { get; set; }
+        public double TemperatureSlopeUnstableCPerMinute { get; set; }
+        public double IdleCpuWarningTemperatureC { get; set; }
+        public double MaximumIdleCpuLoadPct { get; set; }
 
         public static RunConfiguration Create(bool quick, double roomTemperature, string performanceMode, string testMode, RulesConfig rules)
         {
@@ -156,6 +229,26 @@ namespace RogLiquidMetalInspector
             config.GpuLoadDroppedPct = rules.GpuLoadDroppedPct;
             config.GpuEstablishTimeoutSeconds = rules.GpuEstablishTimeoutSeconds;
             config.GpuDropTimeoutSeconds = rules.GpuDropTimeoutSeconds;
+            config.DiagnosticRuleVersion = rules.DiagnosticRuleVersion;
+            config.MinimumFullAnalysisSeconds = rules.MinimumFullAnalysisSeconds;
+            config.MinimumCpuLoadPct = rules.MinimumCpuLoadPct;
+            config.MaximumLoadCoefficientOfVariation = rules.MaximumLoadCoefficientOfVariation;
+            config.MaximumPowerCoefficientOfVariation = rules.MaximumPowerCoefficientOfVariation;
+            config.DominantHotspotShareWarning = rules.DominantHotspotShareWarning;
+            config.PowerRetentionWarningRatio = rules.PowerRetentionWarningRatio;
+            config.PowerRetentionCriticalRatio = rules.PowerRetentionCriticalRatio;
+            config.ClockRetentionWarningRatio = rules.ClockRetentionWarningRatio;
+            config.ClockRetentionCriticalRatio = rules.ClockRetentionCriticalRatio;
+            config.CpuNearLimitTemperatureC = rules.CpuNearLimitTemperatureC;
+            config.GpuHotspotDeltaWarningC = rules.GpuHotspotDeltaWarningC;
+            config.GpuHotspotDeltaCriticalC = rules.GpuHotspotDeltaCriticalC;
+            config.EvidenceWatchScore = rules.EvidenceWatchScore;
+            config.EvidenceSuspectScore = rules.EvidenceSuspectScore;
+            config.EvidenceStrongScore = rules.EvidenceStrongScore;
+            config.MinimumDecisionConfidence = rules.MinimumDecisionConfidence;
+            config.TemperatureSlopeUnstableCPerMinute = rules.TemperatureSlopeUnstableCPerMinute;
+            config.IdleCpuWarningTemperatureC = rules.IdleCpuWarningTemperatureC;
+            config.MaximumIdleCpuLoadPct = rules.MaximumIdleCpuLoadPct;
             return config;
         }
     }

@@ -19,12 +19,16 @@ internal static class AnalysisEngineTests
     {
         TestHybridCoreGroupsDoNotCrossCompare();
         TestSustainedDurationUsesTimestamps();
+        TestSingleHighTemperatureIsNotLiquidMetalEvidence();
+        TestHotIdleBaselineIsOnlySupportingEvidence();
+        TestTwoIndependentCpuSignalsCanReachSuspect();
         TestInterruptedRunCannotRemainGreen();
         TestGpuLowLoadCannotRemainGreen();
+        TestCpuLowLoadCannotRemainGreen();
         TestInvalidCoverageCannotJudge();
         TestReportContainsStatusAndHybridCoreFields();
         if (_failures > 0) throw new Exception(_failures + " tests failed.");
-        Console.WriteLine("ROG detector tests: 6/6 passed");
+        Console.WriteLine("ROG detector tests: 10/10 passed");
     }
 
     private static void TestHybridCoreGroupsDoNotCrossCompare()
@@ -42,7 +46,42 @@ internal static class AnalysisEngineTests
         List<Sample> samples = CpuSamples(35, 2, 22, 5, false);
         AnalysisResult result = AnalysisEngine.Analyze(samples, config, null);
         Assert(result.SustainedPCoreHotspotSeconds >= 60, "sustained duration must use wall clock, not sample count");
-        Assert(result.Severity == "Red", "60 seconds of same-type delta should be suspicious");
+        Assert(result.Severity == "Orange", "one spatial signal alone should request retest, not diagnose");
+        Assert(result.IndependentEvidenceCount == 1, "one spatial signal must remain one independent category");
+    }
+
+    private static void TestSingleHighTemperatureIsNotLiquidMetalEvidence()
+    {
+        RunConfiguration config = CpuConfig();
+        List<Sample> samples = CpuSamples(300, 1, 4, 4, false);
+        foreach (Sample sample in samples) sample.PackageTemperature = 99;
+        AnalysisResult result = AnalysisEngine.Analyze(samples, config, null);
+        Assert(result.SuspicionScore == 0, "high temperature alone must not add liquid-metal suspicion score");
+        Assert(result.Severity == "Green", "high temperature alone must not be diagnosed as contact failure");
+    }
+
+    private static void TestHotIdleBaselineIsOnlySupportingEvidence()
+    {
+        RunConfiguration config = CpuConfig();
+        List<Sample> samples = CpuSamples(300, 1, 4, 4, false);
+        DateTime start = DateTime.Today.AddMinutes(-3);
+        for (int i = 0; i < 120; i++) samples.Add(new Sample {
+            Time = start.AddSeconds(i), Phase = "空闲基线", PackageTemperature = 90, PackagePower = 10,
+            CpuLoad = 8, PCoreCount = 8, ECoreCount = 16, PCoreDelta = 4, ECoreDelta = 4
+        });
+        AnalysisResult result = AnalysisEngine.Analyze(samples, config, TestProfile());
+        Assert(result.Evidence.Exists(e => e.Code == "CPU_IDLE_ABNORMALLY_HOT" && e.Triggered), "hot low-load idle baseline should be recorded");
+        Assert(result.Severity != "Red", "idle temperature alone must remain supporting evidence");
+    }
+
+    private static void TestTwoIndependentCpuSignalsCanReachSuspect()
+    {
+        RunConfiguration config = CpuConfig();
+        List<Sample> samples = CpuSamples(300, 1, 22, 5, false);
+        foreach (Sample sample in samples) { sample.PackageTemperature = 98; sample.PackagePower = 80; }
+        AnalysisResult result = AnalysisEngine.Analyze(samples, config, TestProfile());
+        Assert(result.IndependentEvidenceCount >= 2, "spatial and thermal-resistance signals must be independent");
+        Assert(result.SuspicionScore >= config.EvidenceSuspectScore && result.Severity == "Red", "two strong independent signals should reach suspect");
     }
 
     private static void TestInterruptedRunCannotRemainGreen()
@@ -65,6 +104,15 @@ internal static class AnalysisEngineTests
         });
         AnalysisResult result = AnalysisEngine.Analyze(samples, config, null);
         Assert(!result.CanJudge && result.Severity != "Green", "low GPU load must not produce green result");
+    }
+
+    private static void TestCpuLowLoadCannotRemainGreen()
+    {
+        RunConfiguration config = CpuConfig();
+        List<Sample> samples = CpuSamples(300, 1, 4, 4, false);
+        foreach (Sample sample in samples) sample.CpuLoad = 20;
+        AnalysisResult result = AnalysisEngine.Analyze(samples, config, TestProfile());
+        Assert(!result.CanJudge && result.Severity == "Gray", "low CPU load must not produce a green result");
     }
 
     private static void TestInvalidCoverageCannotJudge()
@@ -102,6 +150,16 @@ internal static class AnalysisEngineTests
     private static RunConfiguration CpuConfig()
     {
         return RunConfiguration.Create(false, 25, "增强 / Turbo", "CPU 单烤", RulesConfig.Default());
+    }
+
+    private static MachineProfile TestProfile()
+    {
+        MachineProfile profile = new MachineProfile { ProfileId = "test", ProfileName = "Test", RequirePCoreAndECore = true, Modes = new List<ModeReference>(), GpuModes = new List<GpuModeReference>() };
+        profile.Modes.Add(new ModeReference {
+            ModeName = "增强 / Turbo", SteadyStartSecond = 0, SteadyEndSecond = 600, ExpectedPowerMin = 120, ExpectedPowerMax = 140,
+            HotTemperatureC = 95, LowPowerAtHotMax = 90, DurationSeconds = 60, SuspectText = "test"
+        });
+        return profile;
     }
 
     private static List<Sample> CpuSamples(int count, int intervalSeconds, double pDelta, double eDelta, bool crossGroupExtremes)
