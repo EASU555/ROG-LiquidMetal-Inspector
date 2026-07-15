@@ -6,23 +6,34 @@ namespace RogLiquidMetalInspector
     public sealed class Sample
     {
         public DateTime Time { get; set; }
+        public double ElapsedSeconds { get; set; }
+        public double SensorReadDurationMilliseconds { get; set; }
         public string Phase { get; set; }
         public double PackageTemperature { get; set; }
         public double PackagePower { get; set; }
         public double AverageClock { get; set; }
         public double FanRpm { get; set; }
+        public double SystemFanRpm { get; set; }
         public double CpuLoad { get; set; }
+        public bool CpuLoadAvailable { get; set; }
         public double GpuTemperature { get; set; }
         public double GpuPower { get; set; }
         public double GpuHotSpotTemperature { get; set; }
         public double GpuMemoryTemperature { get; set; }
         public double GpuLoad { get; set; }
+        public bool GpuLoadAvailable { get; set; }
         public double GpuCoreClock { get; set; }
         public double GpuMemoryClock { get; set; }
         public double GpuMemoryUsed { get; set; }
         public double GpuMemoryTotal { get; set; }
         public double GpuFanRpm { get; set; }
         public string GpuName { get; set; }
+        public string GpuPciBusId { get; set; }
+        public string GpuClockEventReasons { get; set; }
+        public string GpuTelemetrySource { get; set; }
+        public bool GpuThermalLimited { get; set; }
+        public bool GpuPowerLimited { get; set; }
+        public bool GpuPowerBrakeLimited { get; set; }
         public double CoreDelta { get; set; }
         public double PCoreDelta { get; set; }
         public double ECoreDelta { get; set; }
@@ -42,6 +53,9 @@ namespace RogLiquidMetalInspector
             HottestECore = string.Empty;
             SensorSource = string.Empty;
             GpuName = string.Empty;
+            GpuPciBusId = string.Empty;
+            GpuClockEventReasons = string.Empty;
+            GpuTelemetrySource = string.Empty;
         }
     }
 
@@ -58,6 +72,7 @@ namespace RogLiquidMetalInspector
         public string Bios { get; set; }
         public string Windows { get; set; }
         public string Gpu { get; set; }
+        public string GpuDriver { get; set; }
         public bool IsAdministrator { get; set; }
     }
 
@@ -82,10 +97,14 @@ namespace RogLiquidMetalInspector
         public int SampleCount { get; set; }
         public bool IsQuickScreen { get; set; }
         public bool ProfileMatched { get; set; }
+        public bool ProfileModeMatched { get; set; }
+        public bool ConditionsConfirmed { get; set; }
         public string ProfileId { get; set; }
         public string ProfileName { get; set; }
         public string ProfileReference { get; set; }
         public string ProfileEvidence { get; set; }
+        public string ProfileHash { get; set; }
+        public string ProfileSourcePath { get; set; }
         public int SustainedPowerCollapseSeconds { get; set; }
         public bool IsPowerCollapseAtHighTemperature { get; set; }
         public double SteadyGpuTemperature { get; set; }
@@ -100,6 +119,14 @@ namespace RogLiquidMetalInspector
         public double PCoreValidSampleRatio { get; set; }
         public double ECoreValidSampleRatio { get; set; }
         public double GpuValidSampleRatio { get; set; }
+        public double CpuLoadValidSampleRatio { get; set; }
+        public double GpuLoadValidSampleRatio { get; set; }
+        public double SamplingCoverageRatio { get; set; }
+        public double MaximumSampleGapSeconds { get; set; }
+        public double AverageSensorReadDurationMilliseconds { get; set; }
+        public double MaximumSensorReadDurationMilliseconds { get; set; }
+        public bool DataQualityPassed { get; set; }
+        public string DecisionBlockReason { get; set; }
         public double AnalysisDurationSeconds { get; set; }
         public string RunStatus { get; set; }
         public bool IsComplete { get; set; }
@@ -133,6 +160,22 @@ namespace RogLiquidMetalInspector
         public double IdleGpuLoad { get; set; }
         public double TotalSteadyPower { get; set; }
         public double TotalPowerRetention { get; set; }
+        public double GpuThermalEfficiency { get; set; }
+        public double SteadyCpuFanRpm { get; set; }
+        public double SteadySystemFanRpm { get; set; }
+        public double SteadyGpuFanRpm { get; set; }
+        public double GpuThermalLimitSampleRatio { get; set; }
+        public double GpuPowerLimitSampleRatio { get; set; }
+        public string GpuClockEventReasons { get; set; }
+        public string StressGpuDeviceName { get; set; }
+        public string SampledGpuPciBusId { get; set; }
+        public bool GpuDeviceIdentityMatched { get; set; }
+        public bool HistoryBaselineAvailable { get; set; }
+        public int ComparableHistoryRuns { get; set; }
+        public int ReproducedRuns { get; set; }
+        public string ReproductionStatus { get; set; }
+        public double BaselineCpuThermalEfficiency { get; set; }
+        public double BaselineGpuThermalEfficiency { get; set; }
         public int NearCpuLimitSeconds { get; set; }
         public int NearGpuLimitSeconds { get; set; }
         public List<DiagnosticEvidence> Evidence { get; set; }
@@ -142,6 +185,9 @@ namespace RogLiquidMetalInspector
             Evidence = new List<DiagnosticEvidence>();
             ConfidenceLevel = string.Empty;
             DiagnosticRuleVersion = string.Empty;
+            DecisionBlockReason = string.Empty;
+            GpuClockEventReasons = string.Empty;
+            ReproductionStatus = string.Empty;
         }
     }
 
@@ -183,6 +229,7 @@ namespace RogLiquidMetalInspector
         public double GpuLoadDroppedPct { get; set; }
         public int GpuEstablishTimeoutSeconds { get; set; }
         public int GpuDropTimeoutSeconds { get; set; }
+        public int SensorReadTimeoutSeconds { get; set; }
         public string DiagnosticRuleVersion { get; set; }
         public int MinimumFullAnalysisSeconds { get; set; }
         public double MinimumCpuLoadPct { get; set; }
@@ -203,6 +250,15 @@ namespace RogLiquidMetalInspector
         public double TemperatureSlopeUnstableCPerMinute { get; set; }
         public double IdleCpuWarningTemperatureC { get; set; }
         public double MaximumIdleCpuLoadPct { get; set; }
+        public string RulesHash { get; set; }
+        public bool RulesModified { get; set; }
+        public string RulesValidationWarning { get; set; }
+        public bool ConditionsConfirmed { get; set; }
+        public string StressGpuDeviceName { get; set; }
+        public string ProfileHash { get; set; }
+        public bool BaselineAvailable { get; set; }
+        public double BaselineCpuThermalEfficiency { get; set; }
+        public double BaselineGpuThermalEfficiency { get; set; }
 
         public static RunConfiguration Create(bool quick, double roomTemperature, string performanceMode, string testMode, RulesConfig rules)
         {
@@ -229,6 +285,7 @@ namespace RogLiquidMetalInspector
             config.GpuLoadDroppedPct = rules.GpuLoadDroppedPct;
             config.GpuEstablishTimeoutSeconds = rules.GpuEstablishTimeoutSeconds;
             config.GpuDropTimeoutSeconds = rules.GpuDropTimeoutSeconds;
+            config.SensorReadTimeoutSeconds = rules.SensorReadTimeoutSeconds;
             config.DiagnosticRuleVersion = rules.DiagnosticRuleVersion;
             config.MinimumFullAnalysisSeconds = rules.MinimumFullAnalysisSeconds;
             config.MinimumCpuLoadPct = rules.MinimumCpuLoadPct;
@@ -249,6 +306,9 @@ namespace RogLiquidMetalInspector
             config.TemperatureSlopeUnstableCPerMinute = rules.TemperatureSlopeUnstableCPerMinute;
             config.IdleCpuWarningTemperatureC = rules.IdleCpuWarningTemperatureC;
             config.MaximumIdleCpuLoadPct = rules.MaximumIdleCpuLoadPct;
+            config.RulesHash = rules.SourceHash;
+            config.RulesModified = rules.IsModified;
+            config.RulesValidationWarning = rules.ValidationWarning;
             return config;
         }
     }

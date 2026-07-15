@@ -1,6 +1,6 @@
 {
-  "version": "2.0.0",
-  "diagnosticRuleVersion": "multi-evidence-2.0",
+  "version": "2.1.0",
+  "diagnosticRuleVersion": "multi-evidence-2.1",
   "samplingIntervalSeconds": 1,
   "idleSeconds": 120,
   "hotspotProbeSeconds": 60,
@@ -21,6 +21,7 @@
   "gpuLoadDroppedPct": 40,
   "gpuEstablishTimeoutSeconds": 20,
   "gpuDropTimeoutSeconds": 10,
+  "sensorReadTimeoutSeconds": 5,
   "minimumFullAnalysisSeconds": 240,
   "minimumCpuLoadPct": 85,
   "maximumLoadCoefficientOfVariation": 0.15,

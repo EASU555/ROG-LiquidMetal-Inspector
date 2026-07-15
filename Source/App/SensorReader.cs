@@ -16,6 +16,7 @@ namespace RogLiquidMetalInspector
         private string _source;
         private string _lastError;
         private ResolveEventHandler _assemblyResolver;
+        private readonly NvidiaSmiTelemetry _nvidiaTelemetry;
 
         public string Source { get { return _source; } }
         public string LastError { get { return _lastError; } }
@@ -25,6 +26,7 @@ namespace RogLiquidMetalInspector
         {
             _source = "WMI 回退";
             _lastError = string.Empty;
+            _nvidiaTelemetry = new NvidiaSmiTelemetry();
             TryStartLibreHardwareMonitor(executableDirectory);
         }
 
@@ -39,6 +41,7 @@ namespace RogLiquidMetalInspector
                 try
                 {
                     ReadLhm(sample);
+                    _nvidiaTelemetry.Apply(sample);
                     return sample;
                 }
                 catch (Exception ex)
@@ -50,6 +53,7 @@ namespace RogLiquidMetalInspector
                 }
             }
             ReadWmiFallback(sample);
+            _nvidiaTelemetry.Apply(sample);
             return sample;
         }
 
@@ -165,7 +169,18 @@ namespace RogLiquidMetalInspector
             {
                 string type = GetStringProperty(sensor, "SensorType");
                 string name = GetStringProperty(sensor, "Name");
-                double value = GetNullableDoubleProperty(sensor, "Value");
+                double value;
+                if (!TryGetNullableDoubleProperty(sensor, "Value", out value)) continue;
+                if (cpu && type == "Load" && name.IndexOf("Total", StringComparison.OrdinalIgnoreCase) >= 0)
+                {
+                    sample.CpuLoadAvailable = true;
+                    sample.CpuLoad = Math.Max(sample.CpuLoad, Math.Max(0, value));
+                }
+                if (gpu && type == "Load" && (name.IndexOf("Core", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("D3D 3D", StringComparison.OrdinalIgnoreCase) >= 0))
+                {
+                    sample.GpuLoadAvailable = true;
+                    sample.GpuLoad = Math.Max(sample.GpuLoad, Math.Max(0, value));
+                }
                 if (value <= 0) continue;
                 if (cpu && type == "Temperature")
                 {
@@ -190,10 +205,6 @@ namespace RogLiquidMetalInspector
                     cpuClockSum += value;
                     cpuClockCount++;
                 }
-                if (cpu && type == "Load" && name.IndexOf("Total", StringComparison.OrdinalIgnoreCase) >= 0)
-                {
-                    sample.CpuLoad = Math.Max(sample.CpuLoad, value);
-                }
                 if (gpu && type == "Temperature")
                 {
                     if (name.IndexOf("Memory", StringComparison.OrdinalIgnoreCase) >= 0)
@@ -204,7 +215,6 @@ namespace RogLiquidMetalInspector
                         sample.GpuTemperature = Math.Max(sample.GpuTemperature, value);
                 }
                 if (gpu && type == "Power") sample.GpuPower = Math.Max(sample.GpuPower, value);
-                if (gpu && type == "Load" && (name.IndexOf("Core", StringComparison.OrdinalIgnoreCase) >= 0 || name.IndexOf("D3D 3D", StringComparison.OrdinalIgnoreCase) >= 0)) sample.GpuLoad = Math.Max(sample.GpuLoad, value);
                 if (gpu && type == "Clock")
                 {
                     if (name.IndexOf("Memory", StringComparison.OrdinalIgnoreCase) >= 0) sample.GpuMemoryClock = Math.Max(sample.GpuMemoryClock, value);
@@ -217,8 +227,10 @@ namespace RogLiquidMetalInspector
                 }
                 if (type == "Fan")
                 {
-                    sample.FanRpm = Math.Max(sample.FanRpm, value);
                     if (gpu) sample.GpuFanRpm = Math.Max(sample.GpuFanRpm, value);
+                    else if (cpu || name.IndexOf("CPU", StringComparison.OrdinalIgnoreCase) >= 0)
+                        sample.FanRpm = Math.Max(sample.FanRpm, value);
+                    else sample.SystemFanRpm = Math.Max(sample.SystemFanRpm, value);
                 }
             }
         }
@@ -272,13 +284,14 @@ namespace RogLiquidMetalInspector
             return value == null ? string.Empty : value.ToString();
         }
 
-        private static double GetNullableDoubleProperty(object target, string property)
+        private static bool TryGetNullableDoubleProperty(object target, string property, out double result)
         {
+            result = 0;
             PropertyInfo info = target.GetType().GetProperty(property);
             object value = info == null ? null : info.GetValue(target, null);
-            if (value == null) return 0;
-            try { return Convert.ToDouble(value); }
-            catch { return 0; }
+            if (value == null) return false;
+            try { result = Convert.ToDouble(value); return !double.IsNaN(result) && !double.IsInfinity(result); }
+            catch { return false; }
         }
 
         private static void SetPropertyIfPresent(object target, string property, bool value)
@@ -298,6 +311,7 @@ namespace RogLiquidMetalInspector
                 }
             }
             catch { }
+            if (_nvidiaTelemetry != null) _nvidiaTelemetry.Dispose();
             if (_assemblyResolver != null) AppDomain.CurrentDomain.AssemblyResolve -= _assemblyResolver;
         }
 
@@ -308,7 +322,9 @@ namespace RogLiquidMetalInspector
             info.Cpu = GetWmiText("Win32_Processor", "Name");
             info.Bios = GetWmiText("Win32_BIOS", "SMBIOSBIOSVersion");
             info.Windows = GetWindowsVersion();
-            info.Gpu = GetPreferredGpuName();
+            string gpuDriver;
+            info.Gpu = GetPreferredGpuName(out gpuDriver);
+            info.GpuDriver = gpuDriver;
             info.IsAdministrator = new WindowsPrincipal(WindowsIdentity.GetCurrent()).IsInRole(WindowsBuiltInRole.Administrator);
             return info;
         }
@@ -325,15 +341,19 @@ namespace RogLiquidMetalInspector
             return Environment.OSVersion.VersionString;
         }
 
-        private static string GetPreferredGpuName()
+        private static string GetPreferredGpuName(out string driver)
         {
+            driver = "未知";
             try
             {
-                List<string> names = new List<string>();
-                using (ManagementObjectSearcher searcher = new ManagementObjectSearcher("SELECT Name FROM Win32_VideoController"))
-                    foreach (ManagementObject item in searcher.Get()) if (item["Name"] != null) names.Add(item["Name"].ToString().Trim());
-                string preferred = names.FirstOrDefault(n => n.IndexOf("NVIDIA", StringComparison.OrdinalIgnoreCase) >= 0 || n.IndexOf("Radeon", StringComparison.OrdinalIgnoreCase) >= 0);
-                return preferred ?? names.FirstOrDefault() ?? "未知";
+                List<Tuple<string, string>> devices = new List<Tuple<string, string>>();
+                using (ManagementObjectSearcher searcher = new ManagementObjectSearcher("SELECT Name,DriverVersion FROM Win32_VideoController"))
+                    foreach (ManagementObject item in searcher.Get()) if (item["Name"] != null)
+                        devices.Add(Tuple.Create(item["Name"].ToString().Trim(), item["DriverVersion"] == null ? "未知" : item["DriverVersion"].ToString().Trim()));
+                Tuple<string, string> preferred = devices.FirstOrDefault(n => n.Item1.IndexOf("NVIDIA", StringComparison.OrdinalIgnoreCase) >= 0 || n.Item1.IndexOf("Radeon", StringComparison.OrdinalIgnoreCase) >= 0) ?? devices.FirstOrDefault();
+                if (preferred == null) return "未知";
+                driver = preferred.Item2;
+                return preferred.Item1;
             }
             catch { return "未知"; }
         }
