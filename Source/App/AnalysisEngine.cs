@@ -25,6 +25,9 @@ namespace RogLiquidMetalInspector
             List<Sample> steady = SelectSteadyWindow(primary, config, profile);
             result.SampleCount = steady.Count;
             result.AnalysisDurationSeconds = DurationSeconds(steady, config.SamplingIntervalSeconds);
+            result.AverageSensorReadDurationMilliseconds = AveragePositive(steady.Select(s => s.SensorReadDurationMilliseconds));
+            result.MaximumSensorReadDurationMilliseconds = steady.Select(s => s.SensorReadDurationMilliseconds).DefaultIfEmpty(0).Max();
+            bool timelineValid = EvaluateTimeline(steady, config, result);
             FillIdleMetrics(samples, result);
 
             bool cpuTest = config.TestMode != "GPU 单烤";
@@ -35,10 +38,14 @@ namespace RogLiquidMetalInspector
             if (cpuTest) cpuValid = AnalyzeCpuSignals(steady, config, profile, result, gpuTest);
             if (gpuTest) gpuValid = AnalyzeGpuSignals(steady, config, profile, result, cpuTest);
             if (cpuTest && gpuTest) AnalyzeDualSignals(steady, config, result);
+            AnalyzeProbeSignals(samples, config, result, cpuTest);
+            AnalyzeLongitudinalBaseline(config, result, cpuTest, gpuTest);
+            bool qualityValid = EvaluateSteadyQuality(config, result, cpuTest, gpuTest, profile);
 
             CalculateScores(result, cpuTest, gpuTest);
             CalculateConfidence(result, config, cpuTest, gpuTest);
-            FinalizeDecision(result, config, cpuTest, gpuTest, cpuValid && gpuValid);
+            result.DataQualityPassed = timelineValid && cpuValid && gpuValid && qualityValid;
+            FinalizeDecision(result, config, cpuTest, gpuTest, timelineValid && cpuValid && gpuValid, qualityValid);
             return result;
         }
 
@@ -80,6 +87,17 @@ namespace RogLiquidMetalInspector
                     ">=" + Percent(config.MinimumValidSampleRatio), "程序数据质量规则", 0, false);
                 return false;
             }
+            List<Sample> loadSamples = valid.Where(IsCpuLoadAvailable).ToList();
+            result.CpuLoadValidSampleRatio = Ratio(loadSamples.Count, valid.Count);
+            result.CpuAverageLoad = AverageAll(loadSamples.Select(s => s.CpuLoad));
+            result.CpuLoadCoefficientOfVariation = CoefficientOfVariationAll(loadSamples.Select(s => s.CpuLoad));
+            if (result.CpuLoadValidSampleRatio < config.MinimumValidSampleRatio)
+            {
+                AddEvidence(result, "CPU_LOAD_COVERAGE", "CPU", "DataQuality", "Limitation", "CPU 负载字段覆盖不足",
+                    "零负载会作为有效数值保留；只有传感器未报告时才算缺失。", Percent(result.CpuLoadValidSampleRatio),
+                    ">=" + Percent(config.MinimumValidSampleRatio), "程序数据质量规则", 0, false);
+                return false;
+            }
 
             result.PCoreDeltaP95 = Percentile(valid.Where(s => s.PCoreCount >= 2).Select(s => s.PCoreDelta).ToList(), 0.95);
             result.ECoreDeltaP95 = Percentile(valid.Where(s => s.ECoreCount >= 2).Select(s => s.ECoreDelta).ToList(), 0.95);
@@ -87,8 +105,6 @@ namespace RogLiquidMetalInspector
             result.SteadyPackageTemperature = AveragePositive(valid.Select(s => s.PackageTemperature));
             result.SteadyPackagePower = AveragePositive(valid.Select(s => s.PackagePower));
             result.SteadyClock = AveragePositive(valid.Select(s => s.AverageClock));
-            result.CpuAverageLoad = AveragePositive(valid.Select(s => s.CpuLoad));
-            result.CpuLoadCoefficientOfVariation = CoefficientOfVariation(valid.Select(s => s.CpuLoad));
             result.CpuPowerCoefficientOfVariation = CoefficientOfVariation(valid.Select(s => s.PackagePower));
             result.CpuPowerRetention = Retention(valid, s => s.PackagePower);
             result.CpuClockRetention = Retention(valid, s => s.AverageClock);
@@ -96,6 +112,8 @@ namespace RogLiquidMetalInspector
             result.CpuPowerSlopeWPerMinute = SlopePerMinute(valid, s => s.PackagePower);
             result.TemperatureRise = result.SteadyPackageTemperature - config.RoomTemperature;
             result.ThermalEfficiency = result.SteadyPackagePower > 0.1 ? result.TemperatureRise / result.SteadyPackagePower : 0;
+            result.SteadyCpuFanRpm = AveragePositive(valid.Select(s => s.FanRpm));
+            result.SteadySystemFanRpm = AveragePositive(valid.Select(s => s.SystemFanRpm));
             double dominantShare;
             result.DominantHotspot = DominantHotspot(valid, config.WarningCoreDeltaC, out dominantShare);
             result.DominantHotspotShare = dominantShare;
@@ -200,19 +218,54 @@ namespace RogLiquidMetalInspector
                     ">=" + Percent(config.MinimumValidSampleRatio), "程序数据质量规则", 0, false);
                 return false;
             }
+            List<Sample> loadSamples = valid.Where(IsGpuLoadAvailable).ToList();
+            result.GpuLoadValidSampleRatio = Ratio(loadSamples.Count, valid.Count);
+            result.SteadyGpuLoad = AverageAll(loadSamples.Select(s => s.GpuLoad));
+            result.GpuLoadCoefficientOfVariation = CoefficientOfVariationAll(loadSamples.Select(s => s.GpuLoad));
+            if (result.GpuLoadValidSampleRatio < config.MinimumValidSampleRatio)
+            {
+                AddEvidence(result, "GPU_LOAD_COVERAGE", "GPU", "DataQuality", "Limitation", "GPU 负载字段覆盖不足",
+                    "零负载会作为有效数值保留；只有传感器未报告时才算缺失。", Percent(result.GpuLoadValidSampleRatio),
+                    ">=" + Percent(config.MinimumValidSampleRatio), "程序数据质量规则", 0, false);
+                return false;
+            }
 
             result.SteadyGpuTemperature = AveragePositive(valid.Select(s => s.GpuTemperature));
             result.SteadyGpuPower = AveragePositive(valid.Select(s => s.GpuPower));
             result.GpuHotSpotTemperature = AveragePositive(valid.Select(s => s.GpuHotSpotTemperature));
             result.GpuMemoryTemperature = AveragePositive(valid.Select(s => s.GpuMemoryTemperature));
-            result.SteadyGpuLoad = AveragePositive(valid.Select(s => s.GpuLoad));
             result.SteadyGpuCoreClock = AveragePositive(valid.Select(s => s.GpuCoreClock));
-            result.GpuLoadCoefficientOfVariation = CoefficientOfVariation(valid.Select(s => s.GpuLoad));
             result.GpuPowerCoefficientOfVariation = CoefficientOfVariation(valid.Select(s => s.GpuPower));
             result.GpuPowerRetention = Retention(valid, s => s.GpuPower);
             result.GpuClockRetention = Retention(valid, s => s.GpuCoreClock);
             result.GpuTemperatureSlopeCPerMinute = SlopePerMinute(valid, s => s.GpuTemperature);
             result.GpuDeviceName = valid.Select(s => s.GpuName).Where(n => !string.IsNullOrWhiteSpace(n)).GroupBy(n => n).OrderByDescending(g => g.Count()).Select(g => g.Key).FirstOrDefault() ?? string.Empty;
+            result.SampledGpuPciBusId = MostCommon(valid.Select(s => s.GpuPciBusId));
+            result.GpuClockEventReasons = MostCommon(valid.Select(s => s.GpuClockEventReasons));
+            result.GpuThermalLimitSampleRatio = Ratio(valid.Count(s => s.GpuThermalLimited), valid.Count);
+            result.GpuPowerLimitSampleRatio = Ratio(valid.Count(s => s.GpuPowerLimited || s.GpuPowerBrakeLimited), valid.Count);
+            result.SteadyGpuFanRpm = AveragePositive(valid.Select(s => s.GpuFanRpm));
+            result.GpuThermalEfficiency = result.SteadyGpuPower > 0.1 ? (result.SteadyGpuTemperature - config.RoomTemperature) / result.SteadyGpuPower : 0;
+            result.StressGpuDeviceName = config.StressGpuDeviceName ?? string.Empty;
+            result.GpuDeviceIdentityMatched = string.IsNullOrWhiteSpace(config.StressGpuDeviceName) || NvidiaSmiTelemetry.NamesMatch(config.StressGpuDeviceName, result.GpuDeviceName);
+            if (!result.GpuDeviceIdentityMatched)
+            {
+                AddEvidence(result, "GPU_DEVICE_MISMATCH", "GPU", "DataQuality", "Limitation", "压力设备与采样设备不一致",
+                    "OpenCL 压力设备和传感器所选独显不是同一型号，当前 GPU 数据不能用于判断。",
+                    config.StressGpuDeviceName + " / " + result.GpuDeviceName, "设备名称必须一致", "设备身份校验", 0, false);
+                return false;
+            }
+
+            if (result.GpuThermalLimitSampleRatio >= 0.05)
+                AddEvidence(result, "GPU_THERMAL_LIMIT_CONFIRMED", "GPU", "ThermalLimitConfirmed", "Critical", "驱动确认 GPU 热限制活动",
+                    "NVIDIA 驱动在稳态样本中明确报告硬件或软件热降频；这是比功耗/频率推断更直接的热事件。",
+                    Percent(result.GpuThermalLimitSampleRatio) + " / " + result.GpuClockEventReasons, "活动样本 >=5%", "NVIDIA SMI 驱动遥测", 30, true);
+
+            bool powerLimitedByDriver = result.GpuPowerLimitSampleRatio >= 0.10;
+            if (powerLimitedByDriver)
+                AddEvidence(result, "GPU_POWER_LIMIT_ACTIVE", "GPU", "Configuration", "Limitation", "GPU 功耗/供电限制正在活动",
+                    "驱动已说明功耗上限或 Power Brake 在起作用，因此功耗和频率下降不重复归因于散热接触。",
+                    Percent(result.GpuPowerLimitSampleRatio) + " / " + result.GpuClockEventReasons, "活动样本 <10%", "NVIDIA SMI 驱动遥测", 0, false);
 
             GpuModeReference reference = profile == null ? null : profile.FindGpuMode(config.PerformanceMode);
             double minimumLoad = reference == null ? config.GpuLoadEstablishedPct : reference.MinimumLoadPct;
@@ -270,10 +323,10 @@ namespace RogLiquidMetalInspector
                     config.SamplingIntervalSeconds);
                 if (result.SustainedGpuHotLowPowerSeconds >= duration)
                 {
-                    AddEvidence(result, "GPU_HOT_LOW_POWER", "GPU", "ThermalResistance", dual ? "Warning" : "Critical", "GPU 高温低功耗持续存在",
-                        dual ? "双烤功耗会被 Dynamic Boost 动态分配，因此该证据在双烤中降权。" : "负载成立时，高温伴随持续低功耗，支持温控压制或散热热阻异常。",
+                    AddEvidence(result, "GPU_HOT_LOW_POWER", "GPU", powerLimitedByDriver ? "Configuration" : "ThermalResistance", dual || powerLimitedByDriver ? "Warning" : "Critical", "GPU 高温低功耗持续存在",
+                        powerLimitedByDriver ? "驱动同时报告功耗/供电限制，本项只记录现象，不再计入液金异常分。" : dual ? "双烤功耗会被 Dynamic Boost 动态分配，因此该证据在双烤中降权。" : "负载成立时，高温伴随持续低功耗，支持温控压制或散热热阻异常。",
                         ">=" + F1(hotTemperature) + "°C / <=" + F1(lowPower) + "W / " + result.SustainedGpuHotLowPowerSeconds + " 秒",
-                        ">=" + duration + " 秒", "机型档案", dual ? 20 : 30, true);
+                        ">=" + duration + " 秒", "机型档案 + 驱动限制原因", powerLimitedByDriver ? 0 : dual ? 20 : 30, true);
                 }
                 else
                 {
@@ -291,10 +344,10 @@ namespace RogLiquidMetalInspector
 
             bool hotAndLoaded = result.SteadyGpuTemperature >= hotTemperature - 2 && result.SteadyGpuLoad >= minimumLoad;
             AddRetentionEvidence(result, "GPU", "GPU_POWER_RETENTION", "GPU 功耗保持率", result.GpuPowerRetention,
-                config.PowerRetentionWarningRatio, config.PowerRetentionCriticalRatio, hotAndLoaded, 20, 10);
+                config.PowerRetentionWarningRatio, config.PowerRetentionCriticalRatio, hotAndLoaded && !powerLimitedByDriver, 20, 10);
             if (result.SteadyGpuCoreClock > 0)
                 AddRetentionEvidence(result, "GPU", "GPU_CLOCK_RETENTION", "GPU 核心频率保持率", result.GpuClockRetention,
-                    config.ClockRetentionWarningRatio, config.ClockRetentionCriticalRatio, hotAndLoaded, 15, 7);
+                    config.ClockRetentionWarningRatio, config.ClockRetentionCriticalRatio, hotAndLoaded && !powerLimitedByDriver, 15, 7);
             else
                 AddEvidence(result, "GPU_CLOCK_MISSING", "GPU", "DataQuality", "Limitation", "GPU 频率字段缺失",
                     "无法使用频率保持率交叉验证功耗下降。", "未读取", "需要 GPU 核心频率", "传感器限制", 0, false);
@@ -304,7 +357,7 @@ namespace RogLiquidMetalInspector
             {
                 AddEvidence(result, "GPU_POWER_BELOW_PROFILE_COOL", "GPU", "Configuration", "Warning", "GPU 功耗低于档案但温度不高",
                     "更像性能档位、驱动、适配器或 Dynamic Boost 配置差异，不作为液金异常强证据。",
-                    F1(result.SteadyGpuPower) + "W", ">=" + F1(expectedMin) + "W", "机型档案", 8, true);
+                    F1(result.SteadyGpuPower) + "W", ">=" + F1(expectedMin) + "W", "机型档案", 0, true);
             }
             result.NearGpuLimitSeconds = LongestDurationSeconds(valid, s => s.GpuTemperature >= hotTemperature, config.SamplingIntervalSeconds);
             if (result.NearGpuLimitSeconds > 0)
@@ -358,9 +411,9 @@ namespace RogLiquidMetalInspector
 
         private static void CalculateScores(AnalysisResult result, bool cpuTest, bool gpuTest)
         {
-            result.CpuSuspicionScore = ClampScore(result.Evidence.Where(e => e.Triggered && e.Component == "CPU").Sum(e => e.Score));
-            result.GpuSuspicionScore = ClampScore(result.Evidence.Where(e => e.Triggered && e.Component == "GPU").Sum(e => e.Score));
-            double systemScore = result.Evidence.Where(e => e.Triggered && e.Component == "System").Sum(e => e.Score);
+            result.CpuSuspicionScore = ComponentScore(result, "CPU");
+            result.GpuSuspicionScore = ComponentScore(result, "GPU");
+            double systemScore = ComponentScore(result, "System");
             string focus = !gpuTest || (cpuTest && result.CpuSuspicionScore >= result.GpuSuspicionScore) ? "CPU" : "GPU";
             result.SuspicionScore = ClampScore(Math.Max(result.CpuSuspicionScore, result.GpuSuspicionScore) + systemScore);
             result.IndependentEvidenceCount = result.Evidence.Where(e => e.Triggered && e.Score > 0 && (e.Component == focus || e.Component == "System"))
@@ -369,7 +422,10 @@ namespace RogLiquidMetalInspector
 
         private static void CalculateConfidence(AnalysisResult result, RunConfiguration config, bool cpuTest, bool gpuTest)
         {
-            double coverage = cpuTest && gpuTest ? Math.Min(result.CpuValidSampleRatio, result.GpuValidSampleRatio) : cpuTest ? result.CpuValidSampleRatio : result.GpuValidSampleRatio;
+            double cpuCoverage = Math.Min(result.CpuValidSampleRatio, result.CpuLoadValidSampleRatio);
+            double gpuCoverage = Math.Min(result.GpuValidSampleRatio, result.GpuLoadValidSampleRatio);
+            double coverage = cpuTest && gpuTest ? Math.Min(cpuCoverage, gpuCoverage) : cpuTest ? cpuCoverage : gpuCoverage;
+            coverage = Math.Min(coverage, result.SamplingCoverageRatio);
             double confidence = Math.Min(1, coverage) * 35;
             confidence += Math.Min(1, result.AnalysisDurationSeconds / Math.Max(1, config.MinimumFullAnalysisSeconds)) * 25;
             int components = (cpuTest ? 1 : 0) + (gpuTest ? 1 : 0);
@@ -377,7 +433,7 @@ namespace RogLiquidMetalInspector
             if (cpuTest && result.CpuAverageLoad >= config.MinimumCpuLoadPct && result.CpuLoadCoefficientOfVariation <= config.MaximumLoadCoefficientOfVariation) stability += 20.0 / components;
             if (gpuTest && result.SteadyGpuLoad >= config.GpuLoadEstablishedPct && result.GpuLoadCoefficientOfVariation <= config.MaximumLoadCoefficientOfVariation) stability += 20.0 / components;
             confidence += stability;
-            if (result.ProfileMatched) confidence += 10;
+            if (result.ProfileModeMatched) confidence += 10;
             if (config.RoomTemperature >= 10 && config.RoomTemperature <= 40) confidence += 5;
             if (cpuTest && result.PCoreValidSampleRatio >= config.MinimumValidSampleRatio && result.ECoreValidSampleRatio >= config.MinimumValidSampleRatio) confidence += 5.0 / components;
             if (gpuTest && result.GpuValidSampleRatio >= config.MinimumValidSampleRatio) confidence += 5.0 / components;
@@ -386,7 +442,7 @@ namespace RogLiquidMetalInspector
             if (gpuTest && result.GpuPowerCoefficientOfVariation > config.MaximumPowerCoefficientOfVariation) confidence -= 10;
             if (cpuTest && Math.Abs(result.CpuTemperatureSlopeCPerMinute) > config.TemperatureSlopeUnstableCPerMinute) confidence -= 8;
             if (gpuTest && Math.Abs(result.GpuTemperatureSlopeCPerMinute) > config.TemperatureSlopeUnstableCPerMinute) confidence -= 8;
-            if (!result.ProfileMatched) confidence = Math.Min(confidence, 80);
+            if (!result.ProfileModeMatched) confidence = Math.Min(confidence, 80);
             if (config.QuickScreen) confidence = Math.Min(confidence, 55);
             result.ConfidenceScore = ClampScore(confidence);
             result.ConfidenceLevel = result.ConfidenceScore >= 80 ? "高" : result.ConfidenceScore >= 65 ? "中" : result.ConfidenceScore >= 45 ? "低" : "不足";
@@ -401,11 +457,13 @@ namespace RogLiquidMetalInspector
                     "CV <=" + F2(config.MaximumLoadCoefficientOfVariation), "程序数据质量规则", 0, false);
         }
 
-        private static void FinalizeDecision(AnalysisResult result, RunConfiguration config, bool cpuTest, bool gpuTest, bool dataValid)
+        private static void FinalizeDecision(AnalysisResult result, RunConfiguration config, bool cpuTest, bool gpuTest, bool dataValid, bool qualityValid)
         {
-            result.CanJudge = dataValid && !config.QuickScreen && result.ConfidenceScore >= config.MinimumDecisionConfidence;
+            result.CanJudge = dataValid && qualityValid && !config.QuickScreen && result.ConfidenceScore >= config.MinimumDecisionConfidence;
             string focus = !gpuTest || (cpuTest && result.CpuSuspicionScore >= result.GpuSuspicionScore) ? "CPU" : "GPU";
             string prefix = cpuTest && gpuTest ? "双烤" : focus;
+            bool anchorEvidence = result.Evidence.Any(e => e.Triggered && e.Score > 0 && (e.Component == focus || e.Component == "System") &&
+                (e.Category == "Spatial" || e.Category == "ThermalLimitConfirmed" || e.Category == "Longitudinal"));
             if (!dataValid)
             {
                 result.Verdict = "数据不足：无法综合判断"; result.Severity = "Gray"; result.CanJudge = false;
@@ -416,15 +474,19 @@ namespace RogLiquidMetalInspector
                 result.Severity = result.SuspicionScore >= config.EvidenceWatchScore ? "Orange" : "Blue";
                 result.CanJudge = false;
             }
+            else if (!qualityValid)
+            {
+                result.Verdict = "数据尚未稳态：建议同条件复测"; result.Severity = "Orange"; result.CanJudge = false;
+            }
             else if (result.ConfidenceScore < config.MinimumDecisionConfidence)
             {
                 result.Verdict = "证据置信度不足：建议复测"; result.Severity = "Orange"; result.CanJudge = false;
             }
-            else if (result.SuspicionScore >= config.EvidenceStrongScore && result.IndependentEvidenceCount >= 2)
+            else if (result.SuspicionScore >= config.EvidenceStrongScore && result.IndependentEvidenceCount >= 2 && anchorEvidence)
             {
                 result.Verdict = prefix + "：本次高度疑似散热接触异常，需重复验证"; result.Severity = "Red";
             }
-            else if (result.SuspicionScore >= config.EvidenceSuspectScore && result.IndependentEvidenceCount >= 2)
+            else if (result.SuspicionScore >= config.EvidenceSuspectScore && result.IndependentEvidenceCount >= 2 && anchorEvidence)
             {
                 result.Verdict = prefix + "：本次疑似散热接触异常，需重复验证"; result.Severity = "Red";
             }
@@ -440,7 +502,130 @@ namespace RogLiquidMetalInspector
             List<string> top = result.Evidence.Where(e => e.Triggered && e.Score > 0).OrderByDescending(e => e.Score).Take(3).Select(e => e.Title).ToList();
             string evidenceText = top.Count == 0 ? "没有触发异常评分项" : "主要线索：" + string.Join("、", top.ToArray());
             result.Reason = "综合可疑度 " + F0(result.SuspicionScore) + "/100，置信度 " + F0(result.ConfidenceScore) + "/100（" + result.ConfidenceLevel +
-                "），独立证据类别 " + result.IndependentEvidenceCount + "。" + evidenceText + "。单一高温不计为液金偏移证据；异常结论建议同条件三次测试至少复现两次，软件结论不等同拆机确认。";
+                "），独立证据类别 " + result.IndependentEvidenceCount + "。" + evidenceText + "。" +
+                (string.IsNullOrWhiteSpace(result.DecisionBlockReason) ? string.Empty : "结论拦截：" + result.DecisionBlockReason + "。") +
+                "单一高温不计为液金偏移证据；异常结论建议同条件三次测试至少复现两次，软件结论不等同拆机确认。";
+        }
+
+        private static bool EvaluateTimeline(List<Sample> samples, RunConfiguration config, AnalysisResult result)
+        {
+            if (samples == null || samples.Count < 2)
+            {
+                result.SamplingCoverageRatio = samples == null ? 0 : Math.Min(1, samples.Count);
+                result.MaximumSampleGapSeconds = 0;
+                AddEvidence(result, "SAMPLING_DENSITY_INSUFFICIENT", "System", "DataQuality", "Limitation", "采样密度不足",
+                    "主测样本少于 2 个，无法判断时间趋势。", (samples == null ? 0 : samples.Count) + " 个", "至少 2 个连续样本", "程序时间轴校验", 0, false);
+                return false;
+            }
+            List<Sample> ordered = samples.OrderBy(s => s.Time).ToList();
+            double span = Math.Max(0, (ordered.Last().Time - ordered.First().Time).TotalSeconds);
+            int expected = Math.Max(1, (int)Math.Floor(span / Math.Max(0.1, config.SamplingIntervalSeconds)) + 1);
+            result.SamplingCoverageRatio = Math.Min(1, ordered.Count / (double)expected);
+            result.MaximumSampleGapSeconds = ordered.Zip(ordered.Skip(1), (a, b) => (b.Time - a.Time).TotalSeconds).DefaultIfEmpty(0).Max();
+            double allowedGap = Math.Max(config.SamplingIntervalSeconds * 2.5, config.SamplingIntervalSeconds + 1);
+            bool valid = result.SamplingCoverageRatio >= config.MinimumValidSampleRatio && result.MaximumSampleGapSeconds <= allowedGap;
+            AddEvidence(result, valid ? "SAMPLING_DENSITY_OK" : "SAMPLING_DENSITY_INSUFFICIENT", "System", "DataQuality",
+                valid ? "Normal" : "Limitation", valid ? "采样时间轴连续" : "采样时间轴存在缺口",
+                valid ? "样本密度和最大间隔满足时间序列分析要求。" : "仅凭首尾时间会高估采样时长；缺口期间的温度和功耗状态未知。",
+                Percent(result.SamplingCoverageRatio) + " / 最大间隔 " + F2(result.MaximumSampleGapSeconds) + " 秒",
+                "覆盖率 >=" + Percent(config.MinimumValidSampleRatio) + " 且间隔 <=" + F2(allowedGap) + " 秒", "程序时间轴校验", 0, false);
+            return valid;
+        }
+
+        private static bool EvaluateSteadyQuality(RunConfiguration config, AnalysisResult result, bool cpuTest, bool gpuTest, MachineProfile profile)
+        {
+            List<string> blockers = new List<string>();
+            if (cpuTest && Math.Abs(result.CpuTemperatureSlopeCPerMinute) > config.TemperatureSlopeUnstableCPerMinute)
+            {
+                blockers.Add("CPU 温度仍在变化");
+                AddEvidence(result, "CPU_TEMPERATURE_NOT_STEADY", "CPU", "DataQuality", "Limitation", "CPU 温度尚未稳态",
+                    "温度趋势超过稳态边界，当前首末段不能可靠比较。", F2(result.CpuTemperatureSlopeCPerMinute) + " °C/min",
+                    "绝对值 <=" + F2(config.TemperatureSlopeUnstableCPerMinute) + " °C/min", "程序稳态规则", 0, false);
+            }
+            if (gpuTest && Math.Abs(result.GpuTemperatureSlopeCPerMinute) > config.TemperatureSlopeUnstableCPerMinute)
+            {
+                blockers.Add("GPU 温度仍在变化");
+                AddEvidence(result, "GPU_TEMPERATURE_NOT_STEADY", "GPU", "DataQuality", "Limitation", "GPU 温度尚未稳态",
+                    "温度趋势超过稳态边界，当前首末段不能可靠比较。", F2(result.GpuTemperatureSlopeCPerMinute) + " °C/min",
+                    "绝对值 <=" + F2(config.TemperatureSlopeUnstableCPerMinute) + " °C/min", "程序稳态规则", 0, false);
+            }
+            if (cpuTest && result.CpuLoadCoefficientOfVariation > config.MaximumLoadCoefficientOfVariation) blockers.Add("CPU 负载波动过大");
+            if (cpuTest && result.CpuPowerCoefficientOfVariation > config.MaximumPowerCoefficientOfVariation)
+            {
+                blockers.Add("CPU 功耗波动过大");
+                AddEvidence(result, "CPU_POWER_UNSTABLE", "CPU", "DataQuality", "Limitation", "CPU 功耗波动偏大",
+                    "功耗波动会破坏温度、频率和核心温差的可比性。", F2(result.CpuPowerCoefficientOfVariation),
+                    "CV <=" + F2(config.MaximumPowerCoefficientOfVariation), "程序数据质量规则", 0, false);
+            }
+            if (gpuTest && result.GpuLoadCoefficientOfVariation > config.MaximumLoadCoefficientOfVariation) blockers.Add("GPU 负载波动过大");
+            if (gpuTest && result.GpuPowerCoefficientOfVariation > config.MaximumPowerCoefficientOfVariation)
+            {
+                blockers.Add("GPU 功耗波动过大");
+                AddEvidence(result, "GPU_POWER_UNSTABLE", "GPU", "DataQuality", "Limitation", "GPU 功耗波动偏大",
+                    "功耗波动会破坏温度和频率趋势的可比性。", F2(result.GpuPowerCoefficientOfVariation),
+                    "CV <=" + F2(config.MaximumPowerCoefficientOfVariation), "程序数据质量规则", 0, false);
+            }
+            if (profile != null && !result.ProfileModeMatched)
+            {
+                blockers.Add("当前档位缺少精确机型参考");
+                AddEvidence(result, "PROFILE_MODE_MISMATCH", "System", "DataQuality", "Limitation", "机型匹配但当前档位没有参考",
+                    "不能把其他性能档位的温度/功耗范围套用到当前测试。", config.PerformanceMode, "需要同档位 CPU/GPU 参考", "机型档案边界", 0, false);
+            }
+            if (profile != null && !string.IsNullOrWhiteSpace(profile.RequiredConditions) && !config.ConditionsConfirmed)
+            {
+                blockers.Add("测试条件未确认");
+                AddEvidence(result, "CONDITIONS_NOT_CONFIRMED", "System", "DataQuality", "Limitation", "机型档案条件未确认",
+                    profile.RequiredConditions, "未确认", "开始前需人工确认", "机型档案边界", 0, false);
+            }
+            if (config.RulesModified || !string.IsNullOrWhiteSpace(config.RulesValidationWarning))
+                AddEvidence(result, "RULES_PROVENANCE", "System", "Configuration", "Info", "规则文件状态已记录",
+                    string.IsNullOrWhiteSpace(config.RulesValidationWarning) ? "当前规则与内置默认值不同。" : config.RulesValidationWarning,
+                    string.IsNullOrWhiteSpace(config.RulesHash) ? "无哈希" : config.RulesHash, "报告应可追溯", "程序配置溯源", 0, false);
+            if (cpuTest && result.SteadyPackageTemperature >= config.CpuNearLimitTemperatureC - 5 && result.SteadyCpuFanRpm <= 0 && result.SteadySystemFanRpm <= 0)
+                AddEvidence(result, "CPU_FAN_UNAVAILABLE", "CPU", "DataQuality", "Limitation", "CPU/系统风扇转速不可用",
+                    "无法排除风扇策略、停转或风道问题对高温的影响。", "未读取", "高温时应记录风扇转速", "传感器限制", 0, false);
+            if (gpuTest && result.SteadyGpuTemperature >= 80 && result.SteadyGpuFanRpm <= 0 && result.SteadySystemFanRpm <= 0)
+                AddEvidence(result, "GPU_FAN_UNAVAILABLE", "GPU", "DataQuality", "Limitation", "GPU/系统风扇转速不可用",
+                    "无法排除风扇策略、停转或风道问题对高温的影响。", "未读取", "高温时应记录风扇转速", "传感器限制", 0, false);
+            result.DecisionBlockReason = string.Join("；", blockers.Distinct().ToArray());
+            return blockers.Count == 0;
+        }
+
+        private static void AnalyzeProbeSignals(List<Sample> samples, RunConfiguration config, AnalysisResult result, bool cpuTest)
+        {
+            if (!cpuTest || string.IsNullOrWhiteSpace(result.DominantHotspot)) return;
+            List<Sample> probe = samples.Where(s => s.Phase == "热点探测" && (s.PCoreCount >= 2 || s.ECoreCount >= 2)).ToList();
+            if (probe.Count < 3) return;
+            double share;
+            string hotspot = DominantHotspot(probe, config.WarningCoreDeltaC, out share);
+            double delta = Math.Max(Percentile(probe.Where(s => s.PCoreCount >= 2).Select(s => s.PCoreDelta).ToList(), 0.95),
+                Percentile(probe.Where(s => s.ECoreCount >= 2).Select(s => s.ECoreDelta).ToList(), 0.95));
+            if (delta >= config.WarningCoreDeltaC && share >= config.DominantHotspotShareWarning && string.Equals(hotspot, result.DominantHotspot, StringComparison.OrdinalIgnoreCase))
+                AddEvidence(result, "CPU_PROBE_HOTSPOT_REPEATED", "CPU", "Spatial", "Warning", "热点探测与主测复现同一核心热点",
+                    "不同负载阶段由同一核心持续成为热点，降低了偶发调度尖峰的可能性。", hotspot + " / " + F1(delta) + "°C / " + Percent(share),
+                    "同一热点且 P95 >=" + F1(config.WarningCoreDeltaC) + "°C", "程序跨阶段复现证据", 5, true);
+        }
+
+        private static void AnalyzeLongitudinalBaseline(RunConfiguration config, AnalysisResult result, bool cpuTest, bool gpuTest)
+        {
+            result.HistoryBaselineAvailable = config.BaselineAvailable;
+            result.BaselineCpuThermalEfficiency = config.BaselineCpuThermalEfficiency;
+            result.BaselineGpuThermalEfficiency = config.BaselineGpuThermalEfficiency;
+            if (!config.BaselineAvailable) return;
+            if (cpuTest && config.BaselineCpuThermalEfficiency > 0 && result.ThermalEfficiency >= config.BaselineCpuThermalEfficiency * 1.15 && result.CpuAverageLoad >= config.MinimumCpuLoadPct)
+                AddEvidence(result, "CPU_EFFICIENCY_WORSE_THAN_BASELINE", "CPU", "Longitudinal", "Warning", "CPU 热阻代理相对健康基线恶化",
+                    "相同机型、档位、测试模块和相近室温下，每瓦温升明显高于本机历史健康基线。",
+                    F2(result.ThermalEfficiency) + " °C/W", "<" + F2(config.BaselineCpuThermalEfficiency * 1.15) + " °C/W", "本机历史健康基线", 20, true);
+            if (gpuTest && config.BaselineGpuThermalEfficiency > 0 && result.GpuThermalEfficiency >= config.BaselineGpuThermalEfficiency * 1.15 && result.SteadyGpuLoad >= config.GpuLoadEstablishedPct)
+                AddEvidence(result, "GPU_EFFICIENCY_WORSE_THAN_BASELINE", "GPU", "Longitudinal", "Warning", "GPU 热阻代理相对健康基线恶化",
+                    "相同机型、档位、测试模块和相近室温下，每瓦温升明显高于本机历史健康基线。",
+                    F2(result.GpuThermalEfficiency) + " °C/W", "<" + F2(config.BaselineGpuThermalEfficiency * 1.15) + " °C/W", "本机历史健康基线", 20, true);
+        }
+
+        private static double ComponentScore(AnalysisResult result, string component)
+        {
+            return ClampScore(result.Evidence.Where(e => e.Triggered && e.Score > 0 && e.Component == component)
+                .GroupBy(e => e.Category).Sum(g => g.Max(e => e.Score)));
         }
 
         private static void AnalyzeIdleSignals(RunConfiguration config, AnalysisResult result)
@@ -471,9 +656,9 @@ namespace RogLiquidMetalInspector
         {
             List<Sample> idle = samples.Where(s => s.Phase == "空闲基线").ToList();
             result.IdleCpuTemperature = AveragePositive(idle.Select(s => s.PackageTemperature));
-            result.IdleCpuLoad = AveragePositive(idle.Select(s => s.CpuLoad));
+            result.IdleCpuLoad = AverageAll(idle.Where(IsCpuLoadAvailable).Select(s => s.CpuLoad));
             result.IdleGpuTemperature = AveragePositive(idle.Select(s => s.GpuTemperature));
-            result.IdleGpuLoad = AveragePositive(idle.Select(s => s.GpuLoad));
+            result.IdleGpuLoad = AverageAll(idle.Where(IsGpuLoadAvailable).Select(s => s.GpuLoad));
         }
 
         private static List<Sample> SelectSteadyWindow(List<Sample> primary, RunConfiguration config, MachineProfile profile)
@@ -503,6 +688,8 @@ namespace RogLiquidMetalInspector
             return sample.PackageTemperature > 0 && sample.PackagePower > 0 && cores;
         }
         private static bool IsGpuValid(Sample sample) { return sample.GpuTemperature > 0 && sample.GpuPower > 0 && !string.IsNullOrWhiteSpace(sample.GpuName); }
+        private static bool IsCpuLoadAvailable(Sample sample) { return sample != null && (sample.CpuLoadAvailable || sample.CpuLoad > 0); }
+        private static bool IsGpuLoadAvailable(Sample sample) { return sample != null && (sample.GpuLoadAvailable || sample.GpuLoad > 0); }
 
         private static void AddEvidence(AnalysisResult result, string code, string component, string category, string level, string title,
             string description, string observed, string threshold, string sourceTier, double score, bool triggered)
@@ -598,20 +785,46 @@ namespace RogLiquidMetalInspector
         {
             if (profile == null) return;
             result.ProfileMatched = true; result.ProfileId = profile.ProfileId; result.ProfileName = profile.ProfileName;
+            result.ConditionsConfirmed = config.ConditionsConfirmed;
+            result.ProfileHash = profile.SourceHash;
+            result.ProfileSourcePath = profile.SourcePath;
             result.ProfileReference = ProfileLoader.Summary(profile, config.PerformanceMode, config.TestMode);
             if (config.TestMode == "CPU 单烤")
             {
                 ModeReference reference = profile.FindMode(config.PerformanceMode);
+                result.ProfileModeMatched = reference != null;
                 result.ProfileEvidence = reference == null ? profile.WorkloadNotice : reference.SuspectText + " " + profile.WorkloadNotice;
+            }
+            else if (config.TestMode == "GPU 单烤")
+            {
+                GpuModeReference reference = profile.FindGpuMode(config.PerformanceMode);
+                result.ProfileModeMatched = reference != null;
+                result.ProfileEvidence = reference == null ? string.Empty : reference.SuspectText + " " + reference.NormalText;
             }
             else
             {
-                GpuModeReference reference = profile.FindGpuMode(config.PerformanceMode);
-                result.ProfileEvidence = reference == null ? string.Empty : reference.SuspectText + " " + reference.NormalText;
+                ModeReference cpu = profile.FindMode(config.PerformanceMode);
+                GpuModeReference gpu = profile.FindGpuMode(config.PerformanceMode);
+                result.ProfileModeMatched = cpu != null && gpu != null;
+                result.ProfileEvidence = (cpu == null ? string.Empty : cpu.SuspectText + " ") + (gpu == null ? string.Empty : gpu.SuspectText + " " + gpu.NormalText);
             }
         }
 
         private static double AveragePositive(IEnumerable<double> values) { List<double> data = values.Where(v => v > 0).ToList(); return data.Count == 0 ? 0 : data.Average(); }
+        private static double AverageAll(IEnumerable<double> values) { List<double> data = values.Where(v => !double.IsNaN(v) && !double.IsInfinity(v) && v >= 0).ToList(); return data.Count == 0 ? 0 : data.Average(); }
+        private static double CoefficientOfVariationAll(IEnumerable<double> values)
+        {
+            List<double> data = values.Where(v => !double.IsNaN(v) && !double.IsInfinity(v) && v >= 0).ToList();
+            if (data.Count < 2) return 0;
+            double mean = data.Average();
+            if (mean <= 0) return data.Any(v => v > 0) ? 1 : 0;
+            double variance = data.Sum(v => (v - mean) * (v - mean)) / data.Count;
+            return Math.Sqrt(variance) / mean;
+        }
+        private static string MostCommon(IEnumerable<string> values)
+        {
+            return values.Where(v => !string.IsNullOrWhiteSpace(v)).GroupBy(v => v).OrderByDescending(g => g.Count()).Select(g => g.Key).FirstOrDefault() ?? string.Empty;
+        }
         private static double Percentile(List<double> values, double p)
         {
             if (values == null || values.Count == 0) return 0;

@@ -1,5 +1,11 @@
 using System;
+using System.Collections.Generic;
+using System.Globalization;
 using System.IO;
+using System.Linq;
+using System.Reflection;
+using System.Security.Cryptography;
+using System.Text;
 using System.Web.Script.Serialization;
 
 namespace RogLiquidMetalInspector
@@ -27,6 +33,7 @@ namespace RogLiquidMetalInspector
         public double GpuLoadDroppedPct { get; set; }
         public int GpuEstablishTimeoutSeconds { get; set; }
         public int GpuDropTimeoutSeconds { get; set; }
+        public int SensorReadTimeoutSeconds { get; set; }
         public string DiagnosticRuleVersion { get; set; }
         public int MinimumFullAnalysisSeconds { get; set; }
         public double MinimumCpuLoadPct { get; set; }
@@ -47,13 +54,16 @@ namespace RogLiquidMetalInspector
         public double TemperatureSlopeUnstableCPerMinute { get; set; }
         public double IdleCpuWarningTemperatureC { get; set; }
         public double MaximumIdleCpuLoadPct { get; set; }
+        public string SourceHash { get; set; }
+        public bool IsModified { get; set; }
+        public string ValidationWarning { get; set; }
 
         public static RulesConfig Default()
         {
             return new RulesConfig
             {
-                Version = "2.0.0",
-                DiagnosticRuleVersion = "multi-evidence-2.0",
+                Version = "2.1.0",
+                DiagnosticRuleVersion = "multi-evidence-2.1",
                 SamplingIntervalSeconds = 1,
                 IdleSeconds = 120,
                 HotspotProbeSeconds = 60,
@@ -74,6 +84,7 @@ namespace RogLiquidMetalInspector
                 GpuLoadDroppedPct = 40,
                 GpuEstablishTimeoutSeconds = 20,
                 GpuDropTimeoutSeconds = 10,
+                SensorReadTimeoutSeconds = 5,
                 MinimumFullAnalysisSeconds = 240,
                 MinimumCpuLoadPct = 85,
                 MaximumLoadCoefficientOfVariation = 0.15,
@@ -100,59 +111,100 @@ namespace RogLiquidMetalInspector
         {
             RulesConfig fallback = Default();
             string path = Path.Combine(root, "规则默认配置.json");
-            if (!File.Exists(path)) return fallback;
+            JavaScriptSerializer serializer = new JavaScriptSerializer();
+            if (!File.Exists(path))
+            {
+                fallback.SourceHash = HashText(serializer.Serialize(fallback));
+                fallback.ValidationWarning = "外部规则文件不存在，已使用内置默认规则。";
+                return fallback;
+            }
             try
             {
-                RulesConfig loaded = new JavaScriptSerializer().Deserialize<RulesConfig>(File.ReadAllText(path));
+                string text = File.ReadAllText(path);
+                RulesConfig loaded = serializer.Deserialize<RulesConfig>(text);
                 if (loaded == null) return fallback;
+                string beforeValidation = Fingerprint(loaded);
                 ValidateAndFill(loaded, fallback);
+                string afterValidation = Fingerprint(loaded);
+                loaded.SourceHash = HashBytes(File.ReadAllBytes(path));
+                loaded.IsModified = !string.Equals(afterValidation, Fingerprint(fallback), StringComparison.Ordinal);
+                if (beforeValidation != afterValidation)
+                    loaded.ValidationWarning = "规则文件含越界或缺失字段，相关字段已恢复为安全默认值。";
+                else if (loaded.IsModified)
+                    loaded.ValidationWarning = "当前使用的规则参数与程序默认值不同；报告已记录规则哈希。";
                 return loaded;
             }
-            catch { return fallback; }
+            catch (Exception ex)
+            {
+                fallback.SourceHash = HashText(serializer.Serialize(fallback));
+                fallback.ValidationWarning = "规则文件解析失败，已使用内置默认规则：" + ex.Message;
+                return fallback;
+            }
         }
 
         private static void ValidateAndFill(RulesConfig value, RulesConfig fallback)
         {
-            if (value.SamplingIntervalSeconds < 0.25 || value.SamplingIntervalSeconds > 5) value.SamplingIntervalSeconds = fallback.SamplingIntervalSeconds;
-            if (value.IdleSeconds <= 0) value.IdleSeconds = fallback.IdleSeconds;
-            if (value.HotspotProbeSeconds <= 0) value.HotspotProbeSeconds = fallback.HotspotProbeSeconds;
-            if (value.PrimarySeconds <= 0) value.PrimarySeconds = fallback.PrimarySeconds;
-            if (value.QuickIdleSeconds <= 0) value.QuickIdleSeconds = fallback.QuickIdleSeconds;
-            if (value.QuickHotspotProbeSeconds <= 0) value.QuickHotspotProbeSeconds = fallback.QuickHotspotProbeSeconds;
-            if (value.QuickPrimarySeconds <= 0) value.QuickPrimarySeconds = fallback.QuickPrimarySeconds;
-            if (value.AnalysisWindowSeconds <= 0) value.AnalysisWindowSeconds = fallback.AnalysisWindowSeconds;
-            if (value.WarningCoreDeltaC <= 0) value.WarningCoreDeltaC = fallback.WarningCoreDeltaC;
-            if (value.ConfirmCoreDeltaC <= value.WarningCoreDeltaC) value.ConfirmCoreDeltaC = fallback.ConfirmCoreDeltaC;
-            if (value.SustainedSeconds <= 0) value.SustainedSeconds = fallback.SustainedSeconds;
-            if (value.CpuSafetyTemperatureC <= 0) value.CpuSafetyTemperatureC = fallback.CpuSafetyTemperatureC;
-            if (value.GpuSafetyTemperatureC <= 0) value.GpuSafetyTemperatureC = fallback.GpuSafetyTemperatureC;
-            if (value.SafetyDurationSeconds <= 0) value.SafetyDurationSeconds = fallback.SafetyDurationSeconds;
-            if (value.MinimumValidSampleRatio < 0.5 || value.MinimumValidSampleRatio > 1) value.MinimumValidSampleRatio = fallback.MinimumValidSampleRatio;
-            if (value.GpuLoadEstablishedPct <= 0) value.GpuLoadEstablishedPct = fallback.GpuLoadEstablishedPct;
-            if (value.GpuPowerEstablishedW <= 0) value.GpuPowerEstablishedW = fallback.GpuPowerEstablishedW;
-            if (value.GpuLoadDroppedPct <= 0) value.GpuLoadDroppedPct = fallback.GpuLoadDroppedPct;
-            if (value.GpuEstablishTimeoutSeconds <= 0) value.GpuEstablishTimeoutSeconds = fallback.GpuEstablishTimeoutSeconds;
-            if (value.GpuDropTimeoutSeconds <= 0) value.GpuDropTimeoutSeconds = fallback.GpuDropTimeoutSeconds;
+            if (string.IsNullOrWhiteSpace(value.Version)) value.Version = fallback.Version;
+            if (value.SamplingIntervalSeconds < 0.5 || value.SamplingIntervalSeconds > 2) value.SamplingIntervalSeconds = fallback.SamplingIntervalSeconds;
+            if (value.IdleSeconds < 10 || value.IdleSeconds > 1800) value.IdleSeconds = fallback.IdleSeconds;
+            if (value.HotspotProbeSeconds < 10 || value.HotspotProbeSeconds > 600) value.HotspotProbeSeconds = fallback.HotspotProbeSeconds;
+            if (value.PrimarySeconds < 60 || value.PrimarySeconds > 1800) value.PrimarySeconds = fallback.PrimarySeconds;
+            if (value.QuickIdleSeconds < 10 || value.QuickIdleSeconds > 300) value.QuickIdleSeconds = fallback.QuickIdleSeconds;
+            if (value.QuickHotspotProbeSeconds < 10 || value.QuickHotspotProbeSeconds > 300) value.QuickHotspotProbeSeconds = fallback.QuickHotspotProbeSeconds;
+            if (value.QuickPrimarySeconds < 30 || value.QuickPrimarySeconds > 600) value.QuickPrimarySeconds = fallback.QuickPrimarySeconds;
+            if (value.AnalysisWindowSeconds < 30 || value.AnalysisWindowSeconds > value.PrimarySeconds) value.AnalysisWindowSeconds = fallback.AnalysisWindowSeconds;
+            if (value.WarningCoreDeltaC < 5 || value.WarningCoreDeltaC > 30) value.WarningCoreDeltaC = fallback.WarningCoreDeltaC;
+            if (value.ConfirmCoreDeltaC <= value.WarningCoreDeltaC || value.ConfirmCoreDeltaC > 40) value.ConfirmCoreDeltaC = fallback.ConfirmCoreDeltaC;
+            if (value.SustainedSeconds < 10 || value.SustainedSeconds > 600) value.SustainedSeconds = fallback.SustainedSeconds;
+            if (value.CpuSafetyTemperatureC < 90 || value.CpuSafetyTemperatureC > 110) value.CpuSafetyTemperatureC = fallback.CpuSafetyTemperatureC;
+            if (value.GpuSafetyTemperatureC < 75 || value.GpuSafetyTemperatureC > 100) value.GpuSafetyTemperatureC = fallback.GpuSafetyTemperatureC;
+            if (value.SafetyDurationSeconds < 1 || value.SafetyDurationSeconds > 10) value.SafetyDurationSeconds = fallback.SafetyDurationSeconds;
+            if (value.MinimumValidSampleRatio < 0.8 || value.MinimumValidSampleRatio > 1) value.MinimumValidSampleRatio = fallback.MinimumValidSampleRatio;
+            if (value.GpuLoadEstablishedPct < 50 || value.GpuLoadEstablishedPct > 100) value.GpuLoadEstablishedPct = fallback.GpuLoadEstablishedPct;
+            if (value.GpuPowerEstablishedW < 10 || value.GpuPowerEstablishedW > 200) value.GpuPowerEstablishedW = fallback.GpuPowerEstablishedW;
+            if (value.GpuLoadDroppedPct < 0 || value.GpuLoadDroppedPct > 80) value.GpuLoadDroppedPct = fallback.GpuLoadDroppedPct;
+            if (value.GpuEstablishTimeoutSeconds < 5 || value.GpuEstablishTimeoutSeconds > 60) value.GpuEstablishTimeoutSeconds = fallback.GpuEstablishTimeoutSeconds;
+            if (value.GpuDropTimeoutSeconds < 5 || value.GpuDropTimeoutSeconds > 60) value.GpuDropTimeoutSeconds = fallback.GpuDropTimeoutSeconds;
+            if (value.SensorReadTimeoutSeconds < 2 || value.SensorReadTimeoutSeconds > 15) value.SensorReadTimeoutSeconds = fallback.SensorReadTimeoutSeconds;
             if (string.IsNullOrWhiteSpace(value.DiagnosticRuleVersion)) value.DiagnosticRuleVersion = fallback.DiagnosticRuleVersion;
-            if (value.MinimumFullAnalysisSeconds <= 0) value.MinimumFullAnalysisSeconds = fallback.MinimumFullAnalysisSeconds;
-            if (value.MinimumCpuLoadPct <= 0 || value.MinimumCpuLoadPct > 100) value.MinimumCpuLoadPct = fallback.MinimumCpuLoadPct;
-            if (value.MaximumLoadCoefficientOfVariation <= 0 || value.MaximumLoadCoefficientOfVariation > 1) value.MaximumLoadCoefficientOfVariation = fallback.MaximumLoadCoefficientOfVariation;
-            if (value.MaximumPowerCoefficientOfVariation <= 0 || value.MaximumPowerCoefficientOfVariation > 1) value.MaximumPowerCoefficientOfVariation = fallback.MaximumPowerCoefficientOfVariation;
+            if (value.MinimumFullAnalysisSeconds < 60 || value.MinimumFullAnalysisSeconds > value.PrimarySeconds) value.MinimumFullAnalysisSeconds = fallback.MinimumFullAnalysisSeconds;
+            if (value.MinimumCpuLoadPct < 50 || value.MinimumCpuLoadPct > 100) value.MinimumCpuLoadPct = fallback.MinimumCpuLoadPct;
+            if (value.MaximumLoadCoefficientOfVariation < 0.05 || value.MaximumLoadCoefficientOfVariation > 0.8) value.MaximumLoadCoefficientOfVariation = fallback.MaximumLoadCoefficientOfVariation;
+            if (value.MaximumPowerCoefficientOfVariation < 0.05 || value.MaximumPowerCoefficientOfVariation > 0.8) value.MaximumPowerCoefficientOfVariation = fallback.MaximumPowerCoefficientOfVariation;
             if (value.DominantHotspotShareWarning <= 0 || value.DominantHotspotShareWarning > 1) value.DominantHotspotShareWarning = fallback.DominantHotspotShareWarning;
             if (value.PowerRetentionWarningRatio <= 0 || value.PowerRetentionWarningRatio > 1) value.PowerRetentionWarningRatio = fallback.PowerRetentionWarningRatio;
             if (value.PowerRetentionCriticalRatio <= 0 || value.PowerRetentionCriticalRatio >= value.PowerRetentionWarningRatio) value.PowerRetentionCriticalRatio = fallback.PowerRetentionCriticalRatio;
             if (value.ClockRetentionWarningRatio <= 0 || value.ClockRetentionWarningRatio > 1) value.ClockRetentionWarningRatio = fallback.ClockRetentionWarningRatio;
             if (value.ClockRetentionCriticalRatio <= 0 || value.ClockRetentionCriticalRatio >= value.ClockRetentionWarningRatio) value.ClockRetentionCriticalRatio = fallback.ClockRetentionCriticalRatio;
-            if (value.CpuNearLimitTemperatureC <= 0) value.CpuNearLimitTemperatureC = fallback.CpuNearLimitTemperatureC;
-            if (value.GpuHotspotDeltaWarningC <= 0) value.GpuHotspotDeltaWarningC = fallback.GpuHotspotDeltaWarningC;
-            if (value.GpuHotspotDeltaCriticalC <= value.GpuHotspotDeltaWarningC) value.GpuHotspotDeltaCriticalC = fallback.GpuHotspotDeltaCriticalC;
-            if (value.EvidenceWatchScore <= 0) value.EvidenceWatchScore = fallback.EvidenceWatchScore;
-            if (value.EvidenceSuspectScore <= value.EvidenceWatchScore) value.EvidenceSuspectScore = fallback.EvidenceSuspectScore;
-            if (value.EvidenceStrongScore <= value.EvidenceSuspectScore) value.EvidenceStrongScore = fallback.EvidenceStrongScore;
+            if (value.CpuNearLimitTemperatureC < 85 || value.CpuNearLimitTemperatureC > 110) value.CpuNearLimitTemperatureC = fallback.CpuNearLimitTemperatureC;
+            if (value.GpuHotspotDeltaWarningC < 5 || value.GpuHotspotDeltaWarningC > 40) value.GpuHotspotDeltaWarningC = fallback.GpuHotspotDeltaWarningC;
+            if (value.GpuHotspotDeltaCriticalC <= value.GpuHotspotDeltaWarningC || value.GpuHotspotDeltaCriticalC > 60) value.GpuHotspotDeltaCriticalC = fallback.GpuHotspotDeltaCriticalC;
+            if (value.EvidenceWatchScore < 1 || value.EvidenceWatchScore > 100) value.EvidenceWatchScore = fallback.EvidenceWatchScore;
+            if (value.EvidenceSuspectScore <= value.EvidenceWatchScore || value.EvidenceSuspectScore > 100) value.EvidenceSuspectScore = fallback.EvidenceSuspectScore;
+            if (value.EvidenceStrongScore <= value.EvidenceSuspectScore || value.EvidenceStrongScore > 100) value.EvidenceStrongScore = fallback.EvidenceStrongScore;
             if (value.MinimumDecisionConfidence <= 0 || value.MinimumDecisionConfidence > 100) value.MinimumDecisionConfidence = fallback.MinimumDecisionConfidence;
-            if (value.TemperatureSlopeUnstableCPerMinute <= 0) value.TemperatureSlopeUnstableCPerMinute = fallback.TemperatureSlopeUnstableCPerMinute;
-            if (value.IdleCpuWarningTemperatureC <= 0) value.IdleCpuWarningTemperatureC = fallback.IdleCpuWarningTemperatureC;
-            if (value.MaximumIdleCpuLoadPct <= 0 || value.MaximumIdleCpuLoadPct > 100) value.MaximumIdleCpuLoadPct = fallback.MaximumIdleCpuLoadPct;
+            if (value.TemperatureSlopeUnstableCPerMinute < 0.2 || value.TemperatureSlopeUnstableCPerMinute > 10) value.TemperatureSlopeUnstableCPerMinute = fallback.TemperatureSlopeUnstableCPerMinute;
+            if (value.IdleCpuWarningTemperatureC < 40 || value.IdleCpuWarningTemperatureC > 100) value.IdleCpuWarningTemperatureC = fallback.IdleCpuWarningTemperatureC;
+            if (value.MaximumIdleCpuLoadPct < 5 || value.MaximumIdleCpuLoadPct > 50) value.MaximumIdleCpuLoadPct = fallback.MaximumIdleCpuLoadPct;
+        }
+
+        private static string HashText(string value) { return HashBytes(Encoding.UTF8.GetBytes(value ?? string.Empty)); }
+        private static string Fingerprint(RulesConfig value)
+        {
+            List<string> parts = new List<string>();
+            foreach (PropertyInfo property in typeof(RulesConfig).GetProperties().OrderBy(p => p.Name))
+            {
+                if (property.Name == "SourceHash" || property.Name == "IsModified" || property.Name == "ValidationWarning") continue;
+                object raw = property.GetValue(value, null);
+                string text = raw == null ? "<null>" : Convert.ToString(raw, CultureInfo.InvariantCulture);
+                parts.Add(property.Name + "=" + text);
+            }
+            return string.Join("|", parts.ToArray());
+        }
+        private static string HashBytes(byte[] bytes)
+        {
+            using (SHA256 sha = SHA256.Create())
+                return BitConverter.ToString(sha.ComputeHash(bytes)).Replace("-", string.Empty).ToLowerInvariant();
         }
     }
 }

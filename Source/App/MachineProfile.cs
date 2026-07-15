@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Web.Script.Serialization;
 
 namespace RogLiquidMetalInspector
@@ -19,6 +20,8 @@ namespace RogLiquidMetalInspector
         public List<ModeReference> Modes { get; set; }
         public List<GpuModeReference> GpuModes { get; set; }
         public List<ProfileSource> Sources { get; set; }
+        public string SourcePath { get; set; }
+        public string SourceHash { get; set; }
 
         public ModeReference FindMode(string name)
         {
@@ -33,8 +36,9 @@ namespace RogLiquidMetalInspector
         public bool Matches(MachineInfo machine)
         {
             return machine != null && !string.IsNullOrWhiteSpace(machine.Model) && !string.IsNullOrWhiteSpace(machine.Cpu) &&
-                machine.Model.IndexOf(ModelContains ?? string.Empty, StringComparison.OrdinalIgnoreCase) >= 0 &&
-                machine.Cpu.IndexOf(CpuContains ?? string.Empty, StringComparison.OrdinalIgnoreCase) >= 0;
+                !string.IsNullOrWhiteSpace(ModelContains) && !string.IsNullOrWhiteSpace(CpuContains) &&
+                machine.Model.IndexOf(ModelContains, StringComparison.OrdinalIgnoreCase) >= 0 &&
+                machine.Cpu.IndexOf(CpuContains, StringComparison.OrdinalIgnoreCase) >= 0;
         }
     }
 
@@ -90,11 +94,32 @@ namespace RogLiquidMetalInspector
                 try
                 {
                     MachineProfile profile = serializer.Deserialize<MachineProfile>(File.ReadAllText(file));
-                    if (profile != null && profile.Matches(machine)) return profile;
+                    if (profile != null && profile.Matches(machine) && IsValid(profile))
+                    {
+                        profile.SourcePath = Path.GetFileName(file);
+                        using (SHA256 sha = SHA256.Create())
+                            profile.SourceHash = BitConverter.ToString(sha.ComputeHash(File.ReadAllBytes(file))).Replace("-", string.Empty).ToLowerInvariant();
+                        return profile;
+                    }
                 }
                 catch { }
             }
             return null;
+        }
+
+        private static bool IsValid(MachineProfile profile)
+        {
+            if (string.IsNullOrWhiteSpace(profile.ProfileId) || string.IsNullOrWhiteSpace(profile.ProfileName)) return false;
+            if (profile.Modes != null && profile.Modes.Any(m => string.IsNullOrWhiteSpace(m.ModeName) || m.SteadyStartSecond < 0 ||
+                m.SteadyEndSecond <= m.SteadyStartSecond || m.SteadyEndSecond > 1800 || m.ExpectedPowerMin < 0 ||
+                m.ExpectedPowerMax < m.ExpectedPowerMin || m.HotTemperatureC < 70 || m.HotTemperatureC > 110 ||
+                m.LowPowerAtHotMax < 10 || m.LowPowerAtHotMax > 200 || m.DurationSeconds < 10 || m.DurationSeconds > 600)) return false;
+            if (profile.GpuModes != null && profile.GpuModes.Any(m => string.IsNullOrWhiteSpace(m.ModeName) || m.MinimumLoadPct < 50 ||
+                m.MinimumLoadPct > 100 || m.SingleExpectedPowerMin < 0 || m.SingleExpectedPowerMax < m.SingleExpectedPowerMin ||
+                m.DualExpectedPowerMin < 0 || m.DualExpectedPowerMax < m.DualExpectedPowerMin || m.HotTemperatureC < 60 ||
+                m.HotTemperatureC > 100 || m.LowPowerAtHotMax < 10 || m.LowPowerAtHotMax > 200 || m.DurationSeconds < 10 ||
+                m.DurationSeconds > 600)) return false;
+            return true;
         }
 
         public static string Summary(MachineProfile profile, string mode, string testMode)

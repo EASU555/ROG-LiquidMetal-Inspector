@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Security.Cryptography;
 using System.Text;
 using System.Web.Script.Serialization;
 
@@ -24,18 +25,19 @@ namespace RogLiquidMetalInspector
         {
             using (StreamWriter writer = new StreamWriter(path, false, new UTF8Encoding(true)))
             {
-                writer.WriteLine("timestamp,phase,package_temperature_c,package_power_w,cpu_load_pct,average_clock_mhz,p_core_count,p_core_delta_c,hottest_p_core,e_core_count,e_core_delta_c,hottest_e_core,core_delta_c,hottest_core,gpu_name,gpu_temperature_c,gpu_hotspot_c,gpu_memory_temperature_c,gpu_power_w,gpu_load_pct,gpu_core_clock_mhz,gpu_memory_clock_mhz,gpu_memory_used_mb,gpu_memory_total_mb,gpu_fan_rpm,cpu_fan_rpm,sensor_source,core_temperatures");
+                writer.WriteLine("timestamp,elapsed_seconds,sensor_read_ms,phase,package_temperature_c,package_power_w,cpu_load_pct,cpu_load_available,average_clock_mhz,p_core_count,p_core_delta_c,hottest_p_core,e_core_count,e_core_delta_c,hottest_e_core,core_delta_c,hottest_core,gpu_name,gpu_pci_bus_id,gpu_temperature_c,gpu_hotspot_c,gpu_memory_temperature_c,gpu_power_w,gpu_load_pct,gpu_load_available,gpu_core_clock_mhz,gpu_memory_clock_mhz,gpu_memory_used_mb,gpu_memory_total_mb,gpu_fan_rpm,cpu_fan_rpm,system_fan_rpm,gpu_thermal_limited,gpu_power_limited,gpu_power_brake_limited,gpu_clock_event_reasons,gpu_telemetry_source,sensor_source,core_temperatures");
                 foreach (Sample sample in samples)
                 {
                     List<string> cores = new List<string>();
                     foreach (CoreTemperature core in sample.CoreTemperatures)
                         cores.Add(core.Name + ":" + core.Temperature.ToString("F1", CultureInfo.InvariantCulture));
                     writer.WriteLine(string.Join(",", new string[] {
-                        Csv(sample.Time.ToString("o")), Csv(sample.Phase), Num(sample.PackageTemperature), Num(sample.PackagePower), Num(sample.CpuLoad), Num(sample.AverageClock),
+                        Csv(sample.Time.ToString("o")), Num(sample.ElapsedSeconds), Num(sample.SensorReadDurationMilliseconds), Csv(sample.Phase), Num(sample.PackageTemperature), Num(sample.PackagePower), Num(sample.CpuLoad), Bool(sample.CpuLoadAvailable), Num(sample.AverageClock),
                         sample.PCoreCount.ToString(CultureInfo.InvariantCulture), Num(sample.PCoreDelta), Csv(sample.HottestPCore),
                         sample.ECoreCount.ToString(CultureInfo.InvariantCulture), Num(sample.ECoreDelta), Csv(sample.HottestECore), Num(sample.CoreDelta), Csv(sample.HottestCore),
-                        Csv(sample.GpuName), Num(sample.GpuTemperature), Num(sample.GpuHotSpotTemperature), Num(sample.GpuMemoryTemperature), Num(sample.GpuPower), Num(sample.GpuLoad),
-                        Num(sample.GpuCoreClock), Num(sample.GpuMemoryClock), Num(sample.GpuMemoryUsed), Num(sample.GpuMemoryTotal), Num(sample.GpuFanRpm), Num(sample.FanRpm),
+                        Csv(sample.GpuName), Csv(sample.GpuPciBusId), Num(sample.GpuTemperature), Num(sample.GpuHotSpotTemperature), Num(sample.GpuMemoryTemperature), Num(sample.GpuPower), Num(sample.GpuLoad), Bool(sample.GpuLoadAvailable),
+                        Num(sample.GpuCoreClock), Num(sample.GpuMemoryClock), Num(sample.GpuMemoryUsed), Num(sample.GpuMemoryTotal), Num(sample.GpuFanRpm), Num(sample.FanRpm), Num(sample.SystemFanRpm),
+                        Bool(sample.GpuThermalLimited), Bool(sample.GpuPowerLimited), Bool(sample.GpuPowerBrakeLimited), Csv(sample.GpuClockEventReasons), Csv(sample.GpuTelemetrySource),
                         Csv(sample.SensorSource), Csv(string.Join(";", cores))
                     }));
                 }
@@ -51,6 +53,7 @@ namespace RogLiquidMetalInspector
             root["configuration"] = config;
             root["result"] = result;
             root["sensorError"] = sensorError ?? string.Empty;
+            root["artifacts"] = ArtifactHashes();
             root["disclaimer"] = "软件只能筛查散热接触异常，不能在不拆机的情况下确认液金物理偏移或泄漏。";
             JavaScriptSerializer serializer = new JavaScriptSerializer();
             File.WriteAllText(path, serializer.Serialize(root), new UTF8Encoding(true));
@@ -79,13 +82,26 @@ namespace RogLiquidMetalInspector
             Row(html, "独立证据类别", result.IndependentEvidenceCount.ToString(CultureInfo.InvariantCulture));
             Row(html, "分析时长", result.AnalysisDurationSeconds.ToString("F1") + " 秒");
             Row(html, "分析样本", result.SampleCount.ToString(CultureInfo.InvariantCulture));
+            Row(html, "传感器读取耗时（平均 / 最大）", result.AverageSensorReadDurationMilliseconds.ToString("F0") + " / " + result.MaximumSensorReadDurationMilliseconds.ToString("F0") + " ms");
+            Row(html, "时间轴覆盖率 / 最大缺口", Percent(result.SamplingCoverageRatio) + " / " + result.MaximumSampleGapSeconds.ToString("F2") + " 秒");
+            Row(html, "数据质量门槛", result.DataQualityPassed ? "通过" : "未通过");
+            if (!string.IsNullOrWhiteSpace(result.DecisionBlockReason)) Row(html, "结论拦截原因", result.DecisionBlockReason);
+            Row(html, "同条件历史 / 复现", result.ComparableHistoryRuns + " 次 / " + result.ReproducedRuns + " 次");
+            if (!string.IsNullOrWhiteSpace(result.ReproductionStatus)) Row(html, "重复测试状态", result.ReproductionStatus);
+            Row(html, "本机健康基线", result.HistoryBaselineAvailable ? "可用" : "尚未建立（至少需要两次同条件健康记录）");
+            if (result.HistoryBaselineAvailable) Row(html, "CPU / GPU 基线每瓦温升", result.BaselineCpuThermalEfficiency.ToString("F3") + " / " + result.BaselineGpuThermalEfficiency.ToString("F3") + " °C/W");
             if (!string.IsNullOrWhiteSpace(result.RunError)) Row(html, "中止/错误原因", result.RunError);
             EndSection(html);
 
             Section(html, "设备与条件");
-            Row(html, "机型", machine.Model); Row(html, "CPU", machine.Cpu); Row(html, "GPU", machine.Gpu); Row(html, "BIOS", machine.Bios); Row(html, "Windows", machine.Windows);
+            Row(html, "机型", machine.Model); Row(html, "CPU", machine.Cpu); Row(html, "GPU", machine.Gpu); Row(html, "GPU 驱动", machine.GpuDriver); Row(html, "BIOS", machine.Bios); Row(html, "Windows", machine.Windows);
             Row(html, "测试模块", config.TestMode); Row(html, "性能模式", config.PerformanceMode); Row(html, "室温", config.RoomTemperature.ToString("F1") + " °C");
             Row(html, "采样间隔", config.SamplingIntervalSeconds.ToString("F2") + " 秒");
+            Row(html, "传感器读取超时", config.SensorReadTimeoutSeconds + " 秒");
+            Row(html, "条件已人工确认", config.ConditionsConfirmed ? "是" : "否/不适用");
+            Row(html, "规则 SHA-256", Missing(config.RulesHash));
+            Row(html, "规则参数状态", config.RulesModified ? "与内置默认值不同" : "内置默认值");
+            if (!string.IsNullOrWhiteSpace(config.RulesValidationWarning)) Row(html, "规则提示", config.RulesValidationWarning);
             EndSection(html);
 
             if (cpuTest)
@@ -105,10 +121,13 @@ namespace RogLiquidMetalInspector
                 Row(html, "最常见热点", Missing(result.DominantHotspot));
                 Row(html, "固定热点占比", Percent(result.DominantHotspotShare));
                 Row(html, "高温低功耗最长持续", result.SustainedPowerCollapseSeconds + " 秒");
-                Row(html, "平均 CPU 负载", PercentageMetric(result.CpuAverageLoad));
+                Row(html, "CPU 负载字段有效率", Percent(result.CpuLoadValidSampleRatio));
+                Row(html, "平均 CPU 负载", PercentageMetric(result.CpuAverageLoad, result.CpuLoadValidSampleRatio > 0));
                 Row(html, "负载/功耗波动 CV", result.CpuLoadCoefficientOfVariation.ToString("F3") + " / " + result.CpuPowerCoefficientOfVariation.ToString("F3"));
                 Row(html, "功耗/频率保持率", Percent(result.CpuPowerRetention) + " / " + Percent(result.CpuClockRetention));
                 Row(html, "温度/功耗趋势", result.CpuTemperatureSlopeCPerMinute.ToString("F2") + " °C/min / " + result.CpuPowerSlopeWPerMinute.ToString("F2") + " W/min");
+                Row(html, "CPU 每瓦温升", result.ThermalEfficiency > 0 ? result.ThermalEfficiency.ToString("F3") + " °C/W" : "不可计算");
+                Row(html, "CPU / 系统风扇", Fan(result.SteadyCpuFanRpm) + " / " + Fan(result.SteadySystemFanRpm));
                 Row(html, "接近 CPU 温度上限", result.NearCpuLimitSeconds + " 秒");
                 EndSection(html);
             }
@@ -119,7 +138,8 @@ namespace RogLiquidMetalInspector
                 Row(html, "GPU 有效样本率", Percent(result.GpuValidSampleRatio));
                 Row(html, "空闲 GPU 温度 / 负载", Temperature(result.IdleGpuTemperature) + " / " + PercentageMetric(result.IdleGpuLoad));
                 Row(html, "GPU 设备", Missing(result.GpuDeviceName));
-                Row(html, "GPU 稳态负载", PercentageMetric(result.SteadyGpuLoad));
+                Row(html, "GPU 负载字段有效率", Percent(result.GpuLoadValidSampleRatio));
+                Row(html, "GPU 稳态负载", PercentageMetric(result.SteadyGpuLoad, result.GpuLoadValidSampleRatio > 0));
                 Row(html, "GPU 稳态功耗", Power(result.SteadyGpuPower));
                 Row(html, "GPU 稳态温度", Temperature(result.SteadyGpuTemperature));
                 Row(html, "GPU 热点温度", Temperature(result.GpuHotSpotTemperature));
@@ -131,6 +151,13 @@ namespace RogLiquidMetalInspector
                 Row(html, "负载/功耗波动 CV", result.GpuLoadCoefficientOfVariation.ToString("F3") + " / " + result.GpuPowerCoefficientOfVariation.ToString("F3"));
                 Row(html, "功耗/频率保持率", Percent(result.GpuPowerRetention) + " / " + Percent(result.GpuClockRetention));
                 Row(html, "GPU 温度趋势", result.GpuTemperatureSlopeCPerMinute.ToString("F2") + " °C/min");
+                Row(html, "GPU 每瓦温升", result.GpuThermalEfficiency > 0 ? result.GpuThermalEfficiency.ToString("F3") + " °C/W" : "不可计算");
+                Row(html, "GPU / 系统风扇", Fan(result.SteadyGpuFanRpm) + " / " + Fan(result.SteadySystemFanRpm));
+                Row(html, "压力设备 / 采样设备", Missing(result.StressGpuDeviceName) + " / " + Missing(result.GpuDeviceName));
+                Row(html, "设备身份校验", result.GpuDeviceIdentityMatched ? "一致" : "不一致");
+                Row(html, "GPU PCI Bus ID", Missing(result.SampledGpuPciBusId));
+                Row(html, "驱动限制原因", Missing(result.GpuClockEventReasons));
+                Row(html, "热限制 / 功耗限制样本率", Percent(result.GpuThermalLimitSampleRatio) + " / " + Percent(result.GpuPowerLimitSampleRatio));
                 EndSection(html);
             }
 
@@ -156,7 +183,8 @@ namespace RogLiquidMetalInspector
             if (result.ProfileMatched)
             {
                 Section(html, "机型档案参考");
-                Row(html, "匹配档案", result.ProfileName); Row(html, "档案参考", result.ProfileReference); Row(html, "筛查证据", result.ProfileEvidence);
+                Row(html, "匹配档案", result.ProfileName); Row(html, "当前档位匹配", result.ProfileModeMatched ? "是" : "否"); Row(html, "档案参考", result.ProfileReference); Row(html, "筛查证据", result.ProfileEvidence);
+                Row(html, "档案文件", Missing(result.ProfileSourcePath)); Row(html, "档案 SHA-256", Missing(result.ProfileHash));
                 EndSection(html);
             }
 
@@ -185,8 +213,34 @@ namespace RogLiquidMetalInspector
         private static string Power(double value) { return value > 0 ? value.ToString("F1") + " W" : "未读取"; }
         private static string Frequency(double value) { return value > 0 ? value.ToString("F0") + " MHz" : "未读取"; }
         private static string PercentageMetric(double value) { return value > 0 ? value.ToString("F1") + " %" : "未读取"; }
+        private static string PercentageMetric(double value, bool available) { return available ? value.ToString("F1") + " %" : "未读取"; }
+        private static string Fan(double value) { return value > 0 ? value.ToString("F0") + " RPM" : "未读取"; }
         private static string Percent(double value) { return value > 0 ? (value * 100).ToString("F1") + " %" : "0.0 %"; }
         private static string Num(double value) { return value.ToString("F2", CultureInfo.InvariantCulture); }
+        private static string Bool(bool value) { return value ? "1" : "0"; }
         private static string Csv(string value) { return "\"" + (value ?? string.Empty).Replace("\"", "\"\"") + "\""; }
+
+        private static Dictionary<string, object> ArtifactHashes()
+        {
+            Dictionary<string, object> values = new Dictionary<string, object>();
+            string root = AppDomain.CurrentDomain.BaseDirectory;
+            string executable = System.Reflection.Assembly.GetExecutingAssembly().Location;
+            string library = Path.Combine(root, "lib", "LibreHardwareMonitorLib.dll");
+            values["executableSha256"] = HashFile(executable);
+            values["libreHardwareMonitorSha256"] = HashFile(library);
+            return values;
+        }
+
+        private static string HashFile(string path)
+        {
+            if (string.IsNullOrWhiteSpace(path) || !File.Exists(path)) return string.Empty;
+            try
+            {
+                using (SHA256 sha = SHA256.Create())
+                using (FileStream stream = File.OpenRead(path))
+                    return BitConverter.ToString(sha.ComputeHash(stream)).Replace("-", string.Empty).ToLowerInvariant();
+            }
+            catch { return string.Empty; }
+        }
     }
 }

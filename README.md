@@ -1,10 +1,10 @@
 # ROG 液金检测工具（Windows 原生 WPF）
 
-当前版本：v1.1.0。
+当前版本：v1.2.2。
 
 这是一个只读的 CPU、GPU 与双烤散热接触异常筛查工具。它采集温度、功耗、负载、频率、P-Core/E-Core 组内温差和可用的 GPU Hot Spot 数据，生成 CSV、JSON 与 HTML 报告。程序不会修改风扇、功耗或电压。
 
-v1.1.0 将原来的单阈值判断升级为多证据模型：
+v1.2.2 在多证据模型上增加了对抗性防误判，并修复默认规则误警告和双烤阶段同步 GPU 遥测导致的传感器误超时：
 
 - 空间证据：P-Core/E-Core 分组后的温差 P95、持续时间、固定热点重复率、可用时的 GPU Hot Spot 差。
 - 热阻证据：高负载下持续高温与异常低功耗同时出现。
@@ -12,6 +12,12 @@ v1.1.0 将原来的单阈值判断升级为多证据模型：
 - 基线证据：低负载空闲高温只作为辅助线索。
 - 数据质量：有效样本率、测试时长、负载/功耗波动、传感器缺失与机型档案匹配。
 - 双烤解释：按 CPU+GPU 总功耗和分组件证据解释 NVIDIA Dynamic Boost，不要求两者同时达到单烤上限。
+- 数据真实性：零负载不再被过滤；校验预期采样密度、最大采样缺口与传感器读取超时。
+- 稳态门槛：温度仍在爬升、负载/功耗波动过大或当前档位无精确参考时，不输出正式绿色/红色结论。
+- GPU 因果校验：记录 NVIDIA 驱动热限制、功耗限制和 Power Brake 原因；功耗下降与降频按同一因果类别去重。
+- 设备绑定：OpenCL 压力设备必须与传感器采样独显匹配。
+- 重复验证：程序本地保存同条件历史，正式正常/异常结论需要最近三次中至少两次复现，并使用健康历史建立每瓦温升基线。
+- 溯源：报告记录规则、机型档案、EXE 和 LibreHardwareMonitor 的 SHA-256；发布目录包含依赖清单与完整校验清单。
 
 任何单一高温、温差或瓦数都不会直接判定液金偏移。异常结论建议在相同室温、档位和摆放条件下测试三次，并至少复现两次。软件只能筛查“散热接触/热路径异常”，不能在不拆机时确认液金实体偏移、泄漏或具体界面材料故障。
 
@@ -33,6 +39,8 @@ Set-ExecutionPolicy -Scope Process Bypass
 .\Source\Scripts\Build.ps1 -Package
 ```
 
-脚本使用 Windows 自带的 .NET Framework 4.8 C# 编译器，先运行自动化测试，再生成 `Release_v1.1.0` 和 `Package/ROG-LiquidMetal-Inspector_v1.1.0_win-x64.zip`。首次构建时如本地缺少运行库，会从 LibreHardwareMonitor 官方 GitHub Release 下载 v0.9.6。
+脚本使用 Windows 自带的 .NET Framework 4.8 C# 编译器，先运行 19 项自动化/对抗性测试，再生成 `Release_v1.2.2` 和 `Package/ROG-LiquidMetal-Inspector_v1.2.2_win-x64.zip`。首次构建时如本地缺少运行库，会从 LibreHardwareMonitor 官方 GitHub Release 下载 v0.9.6，并强制核对固定 SHA-256。
+
+默认本地构建没有 Authenticode 代码签名，但会生成 SHA-256 校验文件。拥有代码签名证书时可传入 `-SignCertificateThumbprint <指纹>`。管理员程序仍从发布目录的 `lib` 子目录加载 LibreHardwareMonitor 及其依赖；这是已知未处理项，使用时应只运行来自可信发布包且校验值一致的完整目录。
 
 本机检测报告包含机型、BIOS、温度和时间戳等信息，默认由 Git 忽略，不上传到公开仓库。

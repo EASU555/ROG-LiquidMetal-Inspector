@@ -43,13 +43,25 @@ namespace RogLiquidMetalInspector
             using (SensorReader reader = new SensorReader(root))
             {
                 MachineInfo info = SensorReader.GetMachineInfo();
-                Sample sample = reader.Read("Self test");
+                Sample sample = null;
+                for (int attempt = 0; attempt < 5; attempt++)
+                {
+                    Stopwatch readClock = Stopwatch.StartNew();
+                    sample = reader.Read("Self test");
+                    readClock.Stop();
+                    sample.SensorReadDurationMilliseconds = readClock.Elapsed.TotalMilliseconds;
+                    if (!string.IsNullOrWhiteSpace(sample.GpuPciBusId)) break;
+                    Thread.Sleep(250);
+                }
                 string report = string.Join(Environment.NewLine, new string[] {
                     "ROG 液金检测工具自检", "Time=" + DateTime.Now.ToString("o"), "Model=" + info.Model, "CPU=" + info.Cpu,
-                    "Administrator=" + info.IsAdministrator, "SensorSource=" + reader.Source, "PackageTemperature=" + sample.PackageTemperature.ToString("F1"),
+                    "Administrator=" + info.IsAdministrator, "SensorSource=" + reader.Source, "SensorReadMs=" + sample.SensorReadDurationMilliseconds.ToString("F0"), "PackageTemperature=" + sample.PackageTemperature.ToString("F1"),
                     "CoreCount=" + sample.CoreTemperatures.Count, "PackagePower=" + sample.PackagePower.ToString("F1"),
-                    "GPU=" + sample.GpuName, "GpuTemperature=" + sample.GpuTemperature.ToString("F1"), "GpuPower=" + sample.GpuPower.ToString("F1"),
-                    "GpuLoad=" + sample.GpuLoad.ToString("F1"), "GpuClock=" + sample.GpuCoreClock.ToString("F0"), "GpuMemoryTemperature=" + sample.GpuMemoryTemperature.ToString("F1"),
+                    "CpuLoad=" + sample.CpuLoad.ToString("F1"), "CpuLoadAvailable=" + sample.CpuLoadAvailable,
+                    "GPU=" + sample.GpuName, "GpuDriver=" + info.GpuDriver, "GpuPciBusId=" + sample.GpuPciBusId, "GpuTemperature=" + sample.GpuTemperature.ToString("F1"), "GpuPower=" + sample.GpuPower.ToString("F1"),
+                    "GpuLoad=" + sample.GpuLoad.ToString("F1"), "GpuLoadAvailable=" + sample.GpuLoadAvailable, "GpuClock=" + sample.GpuCoreClock.ToString("F0"), "GpuMemoryTemperature=" + sample.GpuMemoryTemperature.ToString("F1"),
+                    "GpuClockEventReasons=" + sample.GpuClockEventReasons, "GpuThermalLimited=" + sample.GpuThermalLimited, "GpuPowerLimited=" + sample.GpuPowerLimited,
+                    "CpuFan=" + sample.FanRpm.ToString("F0"), "SystemFan=" + sample.SystemFanRpm.ToString("F0"), "GpuFan=" + sample.GpuFanRpm.ToString("F0"),
                     "Error=" + reader.LastError
                 });
                 File.WriteAllText(Path.Combine(root, "Reports", "self-test.txt"), report);
@@ -93,6 +105,8 @@ namespace RogLiquidMetalInspector
         private GpuStress _activeGpuStress;
         private string _runStatus;
         private string _stopReason;
+        private Stopwatch _runClock;
+        private DateTime _runStartedAt;
 
         public MainWindow(string root)
         {
@@ -310,10 +324,29 @@ namespace RogLiquidMetalInspector
             {
                 MessageBox.Show("请输入 0–50°C 之间的室温。", "室温无效", MessageBoxButton.OK, MessageBoxImage.Warning); return;
             }
+            RunConfiguration config = RunConfiguration.Create(quick, room, _mode.SelectedItem.ToString(), _testMode.SelectedItem.ToString(), _rules);
+            config.ProfileHash = _profile == null ? string.Empty : _profile.SourceHash;
+            if (_profile != null && !string.IsNullOrWhiteSpace(_profile.RequiredConditions))
+            {
+                MessageBoxResult confirmation = MessageBox.Show("请确认本次测试满足以下条件：\n\n" + _profile.RequiredConditions +
+                    "\n\n当前模块：" + config.TestMode + "\n当前档位：" + config.PerformanceMode + "\n\n满足请选择“是”；不满足将取消测试。",
+                    "确认测试条件", MessageBoxButton.YesNo, MessageBoxImage.Question);
+                if (confirmation != MessageBoxResult.Yes) return;
+                config.ConditionsConfirmed = true;
+            }
+            if (_rules.IsModified || !string.IsNullOrWhiteSpace(_rules.ValidationWarning))
+            {
+                MessageBoxResult ruleConfirmation = MessageBox.Show((_rules.ValidationWarning ?? "规则参数与内置默认值不同。") +
+                    "\n\n规则 SHA-256：" + (_rules.SourceHash ?? "未记录") + "\n\n继续测试吗？",
+                    "规则文件提示", MessageBoxButton.YesNo, MessageBoxImage.Warning);
+                if (ruleConfirmation != MessageBoxResult.Yes) return;
+            }
+            HistoryStore.Prepare(_root, _machine, config);
             _samples.Clear(); _sampleView.Clear(); _lastReportFolder = null; _reportButton.IsEnabled = false;
             _runStatus = "Running"; _stopReason = string.Empty;
             _cancellation = new CancellationTokenSource(); SetRunning(true);
-            RunConfiguration config = RunConfiguration.Create(quick, room, _mode.SelectedItem.ToString(), _testMode.SelectedItem.ToString(), _rules);
+            _runStartedAt = DateTime.Now;
+            _runClock = Stopwatch.StartNew();
             GpuModeReference gpuReference = _profile == null ? null : _profile.FindGpuMode(config.PerformanceMode);
             if (gpuReference != null && config.TestMode != "CPU 单烤")
             {
@@ -326,6 +359,7 @@ namespace RogLiquidMetalInspector
             {
                 MessageBox.Show("传感器未初始化，检测没有开始。\n" + _sensor.LastError, "无法启动检测", MessageBoxButton.OK, MessageBoxImage.Warning);
                 _sensor.Dispose(); _sensor = null;
+                if (_runClock != null) _runClock.Stop();
                 _cancellation.Dispose(); _cancellation = null; SetRunning(false);
                 return;
             }
@@ -362,8 +396,13 @@ namespace RogLiquidMetalInspector
             finally
             {
                 try { _cancellation.Cancel(); } catch { }
+                if (_runClock != null) _runClock.Stop();
                 sensorError = _sensor == null ? string.Empty : _sensor.LastError;
-                if (_sensor != null) { _sensor.Dispose(); _sensor = null; }
+                if (_sensor != null)
+                {
+                    ISensorProvider closing = _sensor; _sensor = null;
+                    try { Task.Run(() => closing.Dispose()).Wait(3000); } catch { }
+                }
                 _cancellation.Dispose(); _cancellation = null; SetRunning(false);
             }
             FinishRun(config, _runStatus, _stopReason, sensorError);
@@ -382,6 +421,7 @@ namespace RogLiquidMetalInspector
                     gpu = new GpuStress(); _activeGpuStress = gpu; gpu.Start(token);
                     bool initialized = await Task.Run(() => gpu.WaitUntilInitialized(15000), token);
                     if (!initialized) { _runStatus = "StressFailed"; throw new InvalidOperationException("GPU 压力源未能启动。" + gpu.LastError); }
+                    config.StressGpuDeviceName = gpu.DeviceName;
                     AddLog(gpu.Status + "。程序将在 " + _rules.GpuEstablishTimeoutSeconds + " 秒内校验实际 GPU Load 与 Power。");
                 }
                 AddLog("进入阶段：" + name + "（按真实时间 " + seconds + " 秒）。");
@@ -389,13 +429,35 @@ namespace RogLiquidMetalInspector
                 double nextSampleAt = 0;
                 bool gpuLoadEstablished = !gpuLoad;
                 bool cpuLoadEstablished = workers < 2;
-                DateTime? gpuLowSince = null, cpuHotSince = null, gpuHotSince = null;
+                DateTime? gpuLowSince = null, cpuLowSince = null, cpuHotSince = null, gpuHotSince = null;
                 DateTime dispatchChangedAt = DateTime.Now;
                 long lastDispatch = gpu == null ? 0 : gpu.DispatchCount;
                 while (phaseClock.Elapsed.TotalSeconds < seconds)
                 {
                     token.ThrowIfCancellationRequested();
-                    Sample sample = await Task.Run(() => _sensor.Read(name), token);
+                    Stopwatch sensorReadClock = Stopwatch.StartNew();
+                    Task<Sample> readTask = Task.Run(() => _sensor.Read(name));
+                    Task completed = await Task.WhenAny(readTask, Task.Delay(TimeSpan.FromSeconds(config.SensorReadTimeoutSeconds), token));
+                    if (completed != readTask)
+                    {
+                        token.ThrowIfCancellationRequested();
+                        _runStatus = "SensorFailed";
+                        throw new TimeoutException("传感器读取超过 " + config.SensorReadTimeoutSeconds + " 秒；压力负载已停止，当前测试无效。");
+                    }
+                    Sample sample = await readTask;
+                    sensorReadClock.Stop();
+                    sample.SensorReadDurationMilliseconds = sensorReadClock.Elapsed.TotalMilliseconds;
+                    if (_runClock != null)
+                    {
+                        sample.ElapsedSeconds = _runClock.Elapsed.TotalSeconds;
+                        sample.Time = _runStartedAt.AddSeconds(sample.ElapsedSeconds);
+                    }
+                    if (gpuLoad && !string.IsNullOrWhiteSpace(gpu.DeviceName) && !string.IsNullOrWhiteSpace(sample.GpuName) &&
+                        !NvidiaSmiTelemetry.NamesMatch(gpu.DeviceName, sample.GpuName))
+                    {
+                        _runStatus = "StressFailed";
+                        throw new InvalidOperationException("GPU 设备不一致：压力运行在“" + gpu.DeviceName + "”，传感器读取“" + sample.GpuName + "”。");
+                    }
                     AddSample(sample);
                     int left = Math.Max(0, (int)Math.Ceiling(seconds - phaseClock.Elapsed.TotalSeconds));
                     _phase.Text = name; _remaining.Text = FormatSeconds(left); UpdateReadings(sample);
@@ -406,6 +468,14 @@ namespace RogLiquidMetalInspector
                     {
                         _runStatus = "StressFailed";
                         throw new InvalidOperationException("CPU 压力未建立：20 秒后 CPU Load/Package Power 仍不足。检测已中止。");
+                    }
+                    if (workers >= 2 && cpuLoadEstablished && sample.CpuLoadAvailable && sample.CpuLoad < 50 && sample.PackagePower < 30)
+                        cpuLowSince = cpuLowSince ?? now;
+                    else cpuLowSince = null;
+                    if (cpuLowSince.HasValue && (now - cpuLowSince.Value).TotalSeconds >= config.GpuDropTimeoutSeconds)
+                    {
+                        _runStatus = "StressFailed";
+                        throw new InvalidOperationException("CPU 压力持续掉载，检测已中止；当前数据不会生成正常结论。");
                     }
                     if (gpuLoad)
                     {
@@ -456,6 +526,7 @@ namespace RogLiquidMetalInspector
         {
             AnalysisResult result = AnalysisEngine.Analyze(_samples, config, _profile);
             AnalysisEngine.ApplyRunStatus(result, runStatus, runError);
+            HistoryStore.ApplyAndSave(_root, _machine, config, result);
             _verdict.Text = result.Verdict; _verdict.Foreground = SeverityBrush(result.Severity); _reason.Text = result.Reason;
             try
             {
@@ -507,15 +578,18 @@ namespace RogLiquidMetalInspector
             _gpuTemp.Text = sample.GpuTemperature > 0 ? sample.GpuTemperature.ToString("F1") + " °C" : "—";
             _gpuPower.Text = sample.GpuPower > 0 ? sample.GpuPower.ToString("F1") + " W" : "—";
             _gpuMemoryTemp.Text = sample.GpuMemoryTemperature > 0 ? sample.GpuMemoryTemperature.ToString("F1") + " °C" : "—";
-            _gpuLoad.Text = sample.GpuLoad > 0 ? sample.GpuLoad.ToString("F0") + " %" : "—";
+            _gpuLoad.Text = sample.GpuLoadAvailable || sample.GpuLoad > 0 ? sample.GpuLoad.ToString("F0") + " %" : "—";
             string gpuName = string.IsNullOrWhiteSpace(sample.GpuName) ? _machine.Gpu : sample.GpuName;
             string vram = sample.GpuMemoryTotal > 0 ? (sample.GpuMemoryUsed / 1024.0).ToString("F1") + "/" + (sample.GpuMemoryTotal / 1024.0).ToString("F1") + " GB" : "未读取";
             string gpuFan = sample.GpuFanRpm > 0 ? sample.GpuFanRpm.ToString("F0") + " RPM" : "未报告/停转";
             string stressState = _activeGpuStress == null ? "未启用" : _activeGpuStress.Status + "，调度 " + _activeGpuStress.DispatchCount;
             _gpuDetails.Text = "独显：" + gpuName + "  · 核心 " + Value(sample.GpuCoreClock, " MHz") + "  · 显存 " + Value(sample.GpuMemoryClock, " MHz") +
-                "  · VRAM " + vram + "  · 热点 " + Value(sample.GpuHotSpotTemperature, " °C") + "  · 风扇 " + gpuFan + "  · 压力源：" + stressState;
+                "  · VRAM " + vram + "  · 热点 " + Value(sample.GpuHotSpotTemperature, " °C") + "  · 风扇 " + gpuFan + "  · PCI " + (string.IsNullOrWhiteSpace(sample.GpuPciBusId) ? "未读取" : sample.GpuPciBusId) +
+                "  · 限制原因 " + (string.IsNullOrWhiteSpace(sample.GpuClockEventReasons) ? "未读取" : sample.GpuClockEventReasons) + "  · 压力源：" + stressState;
             string sensorError = _sensor == null ? string.Empty : _sensor.LastError;
-            _sensorState.Text = "传感器：" + sample.SensorSource + "  · 核温字段：P " + sample.PCoreCount + " / E " + sample.ECoreCount + "（共 " + sample.CoreTemperatures.Count + "） · CPU 风扇：" + (sample.FanRpm > 0 ? sample.FanRpm.ToString("F0") + " RPM" : "未读取") + (string.IsNullOrWhiteSpace(sensorError) ? string.Empty : "  · 错误：" + sensorError);
+            _sensorState.Text = "传感器：" + sample.SensorSource + "  · 本次读取 " + sample.SensorReadDurationMilliseconds.ToString("F0") + " ms  · 核温字段：P " + sample.PCoreCount + " / E " + sample.ECoreCount + "（共 " + sample.CoreTemperatures.Count + "） · CPU/系统风扇：" +
+                (sample.FanRpm > 0 ? sample.FanRpm.ToString("F0") : "—") + "/" + (sample.SystemFanRpm > 0 ? sample.SystemFanRpm.ToString("F0") : "—") + " RPM" +
+                (string.IsNullOrWhiteSpace(sensorError) ? string.Empty : "  · 错误：" + sensorError);
         }
 
         private void SetRunning(bool running)
